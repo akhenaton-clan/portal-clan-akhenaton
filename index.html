@@ -156,7 +156,7 @@
     function showSectionAlert(id, msg, type) {
       const el = document.getElementById(id);
       if (!el) {
-        console.warn("showSectionAlert: Elemento con ID '" + id + "' no encontrado.");
+        console.warn("showSectionAlert: Elemento con ID '" + id + "' no encontrado en el DOM activo.");
         return;
       }
       el.className = `alert alert-${type}`;
@@ -164,7 +164,11 @@
       el.classList.remove("d-none");
       // Desplazar suavemente hacia la alerta
       el.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      setTimeout(() => el.classList.add("d-none"), 5000);
+      setTimeout(() => {
+        // Verificar que el elemento siga existiendo antes de intentar ocultarlo
+        const stillExists = document.getElementById(id);
+        if (stillExists) stillExists.classList.add("d-none");
+      }, 5000);
     }
 
     // =========================================================================
@@ -431,15 +435,25 @@
 
       try {
         const res = await callBaaS("getMeetings", { year: year });
+        
+        // Guard de protección de navegación rápida de SPA
+        const currentTbody = document.getElementById("calendarTableBody");
+        if (!currentTbody) return;
+
         originalMeetingsList = res.data;
         renderCalendarRows(res.data);
       } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="7" class="text-center py-4 text-danger">Error BaaS: ${err.message}</td></tr>`;
+        const currentTbody = document.getElementById("calendarTableBody");
+        if (currentTbody) {
+          currentTbody.innerHTML = `<tr><td colspan="7" class="text-center py-4 text-danger">Error BaaS: ${err.message}</td></tr>`;
+        }
       }
     }
 
     function renderCalendarRows(list) {
       const tbody = document.getElementById("calendarTableBody");
+      if (!tbody) return;
+
       tbody.innerHTML = "";
 
       if (list.length === 0) {
@@ -634,6 +648,11 @@
     async function loadMeetingDetails(id) {
       try {
         const res = await callBaaS("getMeetingDetails", { id: id });
+        
+        // Guard de protección de navegación rápida de SPA
+        const currentLoader = document.getElementById("loader");
+        if (!currentLoader) return;
+
         meetingDetails = res.data;
 
         document.getElementById("headerMeetingName").textContent = meetingDetails.nombre;
@@ -690,30 +709,40 @@
         document.getElementById("loader").classList.add("d-none");
         document.getElementById("meetingContent").classList.remove("d-none");
       } catch (err) {
-        document.getElementById("loader").innerHTML = `
-          <div class="alert alert-danger">
-            <h4 class="fw-bold">Error</h4>
-            <p>${err.message}</p>
-            <a class="btn btn-outline-danger mt-2" href="#program">Volver al Calendario</a>
-          </div>`;
+        const currentLoader = document.getElementById("loader");
+        if (currentLoader) {
+          currentLoader.innerHTML = `
+            <div class="alert alert-danger">
+              <h4 class="fw-bold">Error</h4>
+              <p>${err.message}</p>
+              <a class="btn btn-outline-danger mt-2" href="#program">Volver al Calendario</a>
+            </div>`;
+        }
       }
     }
 
     async function loadEvaluations(reunionId) {
       const container = document.getElementById("evaluationsContainer");
+      if (!container) return;
+
       const counter = document.getElementById("evalCounter");
       container.innerHTML = `<div class="col-12 text-center text-muted">Cargando evaluaciones...</div>`;
 
       try {
         const res = await callBaaS("getMeetingEvaluations", { reunionId: reunionId });
+        
+        // Guard de SPA
+        const currentContainer = document.getElementById("evaluationsContainer");
+        if (!currentContainer) return;
+
         counter.textContent = res.data.length + (res.data.length === 1 ? " reporte" : " reportes");
 
         if (res.data.length === 0) {
-          container.innerHTML = `<div class="col-12 text-center py-4 text-muted border rounded bg-white">Ningún reporte registrado aún.</div>`;
+          currentContainer.innerHTML = `<div class="col-12 text-center py-4 text-muted border rounded bg-white">Ningún reporte registrado aún.</div>`;
           return;
         }
 
-        container.innerHTML = res.data.map(ev => `
+        currentContainer.innerHTML = res.data.map(ev => `
           <div class="col-md-6">
             <div class="card p-3 evaluation-card shadow-sm h-100">
               <h6 class="fw-bold text-dark border-bottom pb-1 mb-2">👤 ${ev.nombreAsistente}</h6>
@@ -735,7 +764,10 @@
           </div>
         `).join("");
       } catch (err) {
-        container.innerHTML = `<div class="col-12 text-center text-danger">Error: ${err.message}</div>`;
+        const currentContainer = document.getElementById("evaluationsContainer");
+        if (currentContainer) {
+          currentContainer.innerHTML = `<div class="col-12 text-center text-danger">Error: ${err.message}</div>`;
+        }
       }
     }
 
@@ -755,14 +787,14 @@
     let localRovers = [];
     let localPilares = [];
     let localRutas = [];
-    let editModal = null;
 
     async function openEditModal() {
       const container = document.getElementById("modalEditBody");
       container.innerHTML = `<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>`;
       
-      // Instanciar modal usando la instancia global inicializada
-      editModal = modalEditMeetingInst;
+      // Auto-instanciación robusta "on-demand" para evitar errores de null o duplicados de backdrop
+      const editModalEl = document.getElementById("modalEdit");
+      const editModal = bootstrap.Modal.getOrCreateInstance(editModalEl);
       editModal.show();
 
       try {
@@ -770,13 +802,17 @@
         const resPilares = await callBaaS("getPilares");
         const resRutas = await callBaaS("getRutasYCompetencias");
 
+        // Guard de SPA
+        const currentContainer = document.getElementById("modalEditBody");
+        if (!currentContainer) return;
+
         localRovers = resRovers.data;
         localPilares = resPilares.data;
         localRutas = resRutas.rutas;
 
         const isRover = !meetingDetails.fullControl;
 
-        container.innerHTML = `
+        currentContainer.innerHTML = `
           <div class="alert alert-warning ${isRover ? "" : "d-none"}" style="font-size: 0.85rem;">
             ⚠️ <strong>Encargado:</strong> Solo puedes editar título, objetivo, observaciones y áreas. Fecha, tipo y encargados están bloqueados.
           </div>
@@ -852,7 +888,10 @@
           </div>`;
 
       } catch (err) {
-        container.innerHTML = `<div class="alert alert-danger">Error BaaS: ${err.message}</div>`;
+        const currentContainer = document.getElementById("modalEditBody");
+        if (currentContainer) {
+          currentContainer.innerHTML = `<div class="alert alert-danger">Error BaaS: ${err.message}</div>`;
+        }
       }
     }
 
@@ -885,6 +924,7 @@
 
       const input = {
         nombre: document.getElementById("editNombre").value.trim(),
+        text: document.getElementById("editNombre").value.trim(),
         objetivo: document.getElementById("editObjetivo").value,
         observacion: document.getElementById("editObservacion").value,
         pilares: pilares,
@@ -897,6 +937,8 @@
 
       try {
         await callBaaS("updateMeeting", { id: meetingDetails.id, reunionInput: input });
+        
+        const editModal = bootstrap.Modal.getOrCreateInstance(document.getElementById("modalEdit"));
         editModal.hide();
         loadMeetingDetails(meetingDetails.id);
       } catch (err) {
@@ -996,8 +1038,11 @@
         const resPilares = await callBaaS("getPilares");
         const resRutas = await callBaaS("getRutasYCompetencias");
 
-        // Pintar Rovers
+        // Guard de SPA
         const rovC = document.getElementById("roversContainer");
+        if (!rovC) return;
+
+        // Pintar Rovers
         if (resRovers.data.length === 0) {
           rovC.innerHTML = `<div class="col-12 text-center text-danger small">No hay Rovers registrados.</div>`;
         } else {
@@ -1013,7 +1058,7 @@
 
         // Pilares
         document.getElementById("pilaresContainer").innerHTML = resPilares.data.map((p, idx) => `
-          <div class="form-check">
+          <div class="form-check text-start">
             <input class="form-check-input pilar-check" type="checkbox" value="${p}" id="chkPil_${idx}">
             <label class="form-check-label small" for="chkPil_${idx}">${p}</label>
           </div>
@@ -1021,7 +1066,7 @@
 
         // Rutas
         document.getElementById("rutasContainer").innerHTML = resRutas.rutas.map((r, idx) => `
-          <div class="form-check">
+          <div class="form-check text-start">
             <input class="form-check-input ruta-check" type="checkbox" value="${r.nombre}" id="chkRut_${idx}">
             <label class="form-check-label small" for="chkRut_${idx}">${r.nombre}</label>
           </div>
@@ -1029,76 +1074,6 @@
 
       } catch (err) {
         alert("BaaS Error: " + err.message);
-      }
-    }
-
-    function toggleActivityType() {
-      const tipo = document.getElementById("selectTipo").value;
-      const lugar = document.getElementById("inputLugar");
-      const fGroup = document.getElementById("fechaFinGroup");
-      if (tipo === "reunión") {
-        lugar.value = "I.E. Santa Rosa de Lima";
-        lugar.readOnly = true;
-        lugar.classList.add("bg-light");
-        fGroup.style.display = "none";
-      } else {
-        lugar.value = "";
-        lugar.placeholder = "Indica el lugar...";
-        lugar.readOnly = false;
-        lugar.classList.remove("bg-light");
-        fGroup.style.display = tipo === "campamento" ? "block" : "none";
-      }
-    }
-
-    function onStartDateChange() {
-      const start = document.getElementById("inputFecha").value;
-      const end = document.getElementById("inputFechaFin");
-      if (start) {
-        end.min = start;
-        if (!end.value || end.value < start) end.value = start;
-      }
-    }
-
-    async function createMeeting(e) {
-      e.preventDefault();
-      const encargados = Array.from(document.querySelectorAll(".rover-check:checked")).map(cb => cb.value);
-      if (encargados.length === 0) {
-        alert("Selecciona al menos un Rover encargado.");
-        return;
-      }
-
-      const pilares = Array.from(document.querySelectorAll(".pilar-check:checked")).map(cb => cb.value);
-      const rutas = Array.from(document.querySelectorAll(".ruta-check:checked")).map(cb => cb.value);
-      
-      const btn = document.getElementById("btnSubmit");
-      btn.disabled = true;
-      btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span> Creando Docs en Drive...`;
-
-      const input = {
-        fecha: document.getElementById("inputFecha").value,
-        nombre: document.getElementById("inputNombre").value.trim(),
-        tipo: document.getElementById("selectTipo").value,
-        lugar: document.getElementById("inputLugar").value.trim(),
-        fechaFin: document.getElementById("inputFechaFin").value || null,
-        objetivo: document.getElementById("inputObjetivo").value,
-        observacion: document.getElementById("inputObservacion").value,
-        pilares: pilares,
-        rutas: rutas,
-        encargados: encargados
-      };
-
-      try {
-        const res = await callBaaS("createMeeting", { reunionInput: input });
-        document.getElementById("alertBox").className = "alert alert-success";
-        document.getElementById("alertBox").textContent = res.message;
-        document.getElementById("alertBox").classList.remove("d-none");
-        setTimeout(() => { window.location.hash = `#meeting/${res.id}`; }, 1500);
-      } catch (err) {
-        btn.disabled = false;
-        btn.textContent = "✨ Crear y Clonar Docs";
-        document.getElementById("alertBox").className = "alert alert-danger";
-        document.getElementById("alertBox").textContent = err.message;
-        document.getElementById("alertBox").classList.remove("d-none");
       }
     }
 
@@ -1260,13 +1235,16 @@
         const users = await callBaaS("getAllUsersPlain");
         const configs = await callBaaS("getRutasYCompetencias");
 
+        // Guard de SPA
+        const selU = document.getElementById("selectUsuario");
+        if (!selU) return;
+
         activeMeetings = meetings.data;
         usersPlain = users.data;
         wizardRutas = configs.rutas;
         wizardCompetencias = configs.competencias;
 
         // Poblar integrantes
-        const selU = document.getElementById("selectUsuario");
         selU.innerHTML = `<option value="" disabled>Selecciona al integrante...</option>` +
           usersPlain.map(u => `<option value="${u.correo}" ${u.correo === AppState.sessionEmail ? "selected" : ""}>${u.nombreCompleto} (${u.apodo})</option>`).join("");
 
@@ -1551,13 +1529,20 @@
 
     async function loadUsers() {
       const tbody = document.getElementById("usersTableBody");
+      if (!tbody) return;
+
       try {
         const res = await callBaaS("getUsers");
+        
+        // Guard de SPA
+        const currentTbody = document.getElementById("usersTableBody");
+        if (!currentTbody) return;
+
         usersList = res.data;
-        tbody.innerHTML = "";
+        currentTbody.innerHTML = "";
 
         if (usersList.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-muted">No hay integrantes registrados.</td></tr>`;
+          currentTbody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-muted">No hay integrantes registrados.</td></tr>`;
           return;
         }
 
@@ -1584,10 +1569,13 @@
                 <button class="btn btn-outline-danger btn-sm" onclick="deleteUser('${u.correo}')">Eliminar</button>
               </div>
             </td>`;
-          tbody.appendChild(tr);
+          currentTbody.appendChild(tr);
         });
       } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-danger">Error: ${err.message}</td></tr>`;
+        const currentTbody = document.getElementById("usersTableBody");
+        if (currentTbody) {
+          currentTbody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-danger">Error: ${err.message}</td></tr>`;
+        }
       }
     }
 
@@ -1599,7 +1587,9 @@
       document.getElementById("modalNombre").value = "";
       document.getElementById("modalUserAlert").classList.add("d-none");
       document.querySelectorAll(".role-check").forEach(cb => cb.checked = false);
-      modalUserInst.show();
+
+      const modalUser = bootstrap.Modal.getOrCreateInstance(document.getElementById("modalUser"));
+      modalUser.show();
     }
 
     function openEditUserModal(email) {
@@ -1616,7 +1606,9 @@
       document.querySelectorAll(".role-check").forEach(cb => {
         cb.checked = u.roles.includes(cb.value);
       });
-      modalUserInst.show();
+
+      const modalUser = bootstrap.Modal.getOrCreateInstance(document.getElementById("modalUser"));
+      modalUser.show();
     }
 
     async function saveUser(e) {
@@ -1641,7 +1633,9 @@
           email: email,
           profileInput: { nombreCompleto: nombre, roles: roles }
         });
-        modalUserInst.hide();
+        
+        const modalUser = bootstrap.Modal.getOrCreateInstance(document.getElementById("modalUser"));
+        modalUser.hide();
         loadUsers();
         alert(res.message);
       } catch (err) {
@@ -1810,6 +1804,11 @@
         profileCompsMaster = configs.competencias;
 
         const res = await callBaaS("getUserData", { email: email });
+        
+        // Guard de SPA
+        const currentLoader = document.getElementById("profileLoader");
+        if (!currentLoader) return;
+
         localProfileUser = res.data;
 
         document.getElementById("profEmail").value = localProfileUser.correo;
@@ -1823,7 +1822,7 @@
         selectIcon(localProfileUser.icono || "user");
 
         // Plan de Adelanto condicional
-        if (localProfileUser.esRover && localProfileUser.tieneAccesoAdelanto) {
+        if (localProfileUser.esRover && localProfileUser.tieneAccAccessAdelanto || (localProfileUser.esRover && localProfileUser.tieneAccesoAdelanto)) {
           renderPlanAdelantoForm(localProfileUser);
           document.getElementById("sectionPlanAdelanto").classList.remove("d-none");
         }
@@ -1831,11 +1830,14 @@
         // Cargar tabla histórica de asistencias
         loadHistoricalAssistances(email);
 
-        document.getElementById("profileLoader").classList.add("d-none");
+        currentLoader.classList.add("d-none");
         document.getElementById("profileContent").classList.remove("d-none");
 
       } catch (err) {
-        document.getElementById("profileLoader").innerHTML = `<div class="alert alert-danger text-start">Fallo al conectar con BaaS: ${err.message}</div>`;
+        const currentLoader = document.getElementById("profileLoader");
+        if (currentLoader) {
+          currentLoader.innerHTML = `<div class="alert alert-danger text-start">Fallo al conectar con BaaS: ${err.message}</div>`;
+        }
       }
     }
 
@@ -1971,10 +1973,10 @@
         rutasGanadas[rName] = { ganada: sw.checked, fechaEntrega: fEntrega || null };
       });
 
-      const competenciasNivel = {};
+      const competenciesNivel = {};
       document.querySelectorAll(".profile-comp-select").forEach(sel => {
         const cName = sel.getAttribute("data-comp");
-        competenciasNivel[cName] = parseInt(sel.value, 10);
+        competenciesNivel[cName] = parseInt(sel.value, 10);
       });
 
       const input = {
@@ -1984,7 +1986,7 @@
         fechaObtencionRL: document.getElementById("inputObtencionRL").value,
         fechaObtencionBP: document.getElementById("inputObtencionBP").value,
         rutasGanadas: rutasGanadas,
-        competenciasNivel: competenciasNivel
+        competenciasNivel: competenciesNivel
       };
 
       try {
@@ -2002,13 +2004,20 @@
 
     async function loadHistoricalAssistances(email) {
       const tbody = document.getElementById("assistTableBody");
+      if (!tbody) return;
+
       try {
         const res = await callBaaS("getRoverAssistances", { email: email });
+        
+        // Guard de SPA
+        const currentTbody = document.getElementById("assistTableBody");
+        if (!currentTbody) return;
+
         localRoverAssistancesList = res.data;
-        tbody.innerHTML = "";
+        currentTbody.innerHTML = "";
 
         if (res.data.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="6" class="text-center py-3 text-muted">No se registran asistencias para este usuario.</td></tr>`;
+          currentTbody.innerHTML = `<tr><td colspan="6" class="text-center py-3 text-muted">No se registran asistencias para este usuario.</td></tr>`;
           return;
         }
 
@@ -2023,10 +2032,13 @@
             <td>${ast.rutasTrabajadas}</td>
             <td class="text-truncate" style="max-width: 200px;">${ast.competenciasTrabajadas}</td>
             <td class="text-center fw-bold text-success">${ast.autoevaluacion} / 5</td>`;
-          tbody.appendChild(tr);
+          currentTbody.appendChild(tr);
         });
       } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-3 text-danger">Error: ${err.message}</td></tr>`;
+        const currentTbody = document.getElementById("assistTableBody");
+        if (currentTbody) {
+          currentTbody.innerHTML = `<tr><td colspan="6" class="text-center py-3 text-danger">Error: ${err.message}</td></tr>`;
+        }
       }
     }
 
@@ -2283,6 +2295,10 @@
     }
 
     async function loadTemplatesConfig() {
+      // Guard de protección de SPA para evitar lecturas sobre elementos nulos
+      const fmt = document.getElementById("tmplFormato");
+      if (!fmt) return;
+
       try {
         const res = await callBaaS("getSystemConfigs");
         document.getElementById("tmplFormato").value = res.data.templateFormatoUrl;
@@ -2319,12 +2335,18 @@
 
     async function loadConfigPrograms() {
       const tbody = document.getElementById("tblConfigPrograms");
+      if (!tbody) return;
+
       tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted">Cargando...</td></tr>`;
 
       try {
         const res = await callBaaS("getPrograms");
+        
+        const currentTbody = document.getElementById("tblConfigPrograms");
+        if (!currentTbody) return;
+
         localProgs = res.data;
-        tbody.innerHTML = res.data.map(p => `
+        currentTbody.innerHTML = res.data.map(p => `
           <tr>
             <td><span class="badge bg-dark">${p.anio}</span></td>
             <td><strong>${p.fechaInicio}</strong></td>
@@ -2334,32 +2356,37 @@
           </tr>
         `).join("");
       } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Error: ${err.message}</td></tr>`;
+        const currentTbody = document.getElementById("tblConfigPrograms");
+        if (currentTbody) {
+          currentTbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Error: ${err.message}</td></tr>`;
+        }
       }
     }
 
     function openCreateProgramModal() {
       isProgramEditing = false;
-      document.getElementById("modalProgramLabel").textContent = "📅 Abrir Programa Anual";
       document.getElementById("pAnio").value = new Date().getFullYear();
       document.getElementById("pAnio").readOnly = false;
       document.getElementById("pFechaIn").value = "";
       document.getElementById("pFormUrl").value = "";
       document.getElementById("pActaUrl").value = "";
-      modalProgramInst.show();
+
+      const modalProgram = bootstrap.Modal.getOrCreateInstance(document.getElementById("modalProg"));
+      modalProgram.show();
     }
 
     function openEditProgramModal(year) {
       const p = localProgs.find(prog => prog.anio === year);
       if (!p) return;
       isProgramEditing = true;
-      document.getElementById("modalProgramLabel").textContent = "📅 Editar Programa Anual";
       document.getElementById("pAnio").value = p.anio;
       document.getElementById("pAnio").readOnly = true;
       document.getElementById("pFechaIn").value = p.fechaInicio;
       document.getElementById("pFormUrl").value = p.carpetaFormatosUrl;
       document.getElementById("pActaUrl").value = p.carpetaActasUrl;
-      modalProgramInst.show();
+
+      const modalProgram = bootstrap.Modal.getOrCreateInstance(document.getElementById("modalProg"));
+      modalProgram.show();
     }
 
     async function saveProgram(e) {
@@ -2377,7 +2404,9 @@
 
       try {
         const res = await callBaaS("saveProgram", { programInput: input });
-        modalProgramInst.hide();
+        
+        const modalProgram = bootstrap.Modal.getOrCreateInstance(document.getElementById("modalProg"));
+        modalProgram.hide();
         loadConfigPrograms();
         showSectionAlert("progsAlert", res.message, "success");
       } catch (err) {
@@ -2393,12 +2422,18 @@
 
     async function loadConfigRutas() {
       const tbody = document.getElementById("tblConfigRutas");
+      if (!tbody) return;
+
       tbody.innerHTML = `<tr><td colspan="3" class="text-center text-muted">Cargando...</td></tr>`;
 
       try {
         const res = await callBaaS("getRutasYCompetencias");
+        
+        const currentTbody = document.getElementById("tblConfigRutas");
+        if (!currentTbody) return;
+
         localRutasConfig = res.rutas;
-        tbody.innerHTML = res.rutas.map(r => `
+        currentTbody.innerHTML = res.rutas.map(r => `
           <tr>
             <td><strong>${r.nombre}</strong></td>
             <td class="text-muted small">${r.descripcion}</td>
@@ -2411,28 +2446,33 @@
           </tr>
         `).join("");
       } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="3" class="text-center text-danger">Error: ${err.message}</td></tr>`;
+        const currentTbody = document.getElementById("tblConfigRutas");
+        if (currentTbody) {
+          currentTbody.innerHTML = `<tr><td colspan="3" class="text-center text-danger">Error: ${err.message}</td></tr>`;
+        }
       }
     }
 
     function openCreateRutaModal() {
       isRutaEditing = false;
-      document.getElementById("modalRutaLabel").textContent = "🗺️ Registrar Ruta Formativa";
       document.getElementById("rNombre").value = "";
       document.getElementById("rNombre").readOnly = false;
       document.getElementById("rDesc").value = "";
-      modalRutaInst.show();
+
+      const modalRuta = bootstrap.Modal.getOrCreateInstance(document.getElementById("modalRut"));
+      modalRuta.show();
     }
 
     function openEditRutaModal(name) {
       const r = localRutasConfig.find(ruta => ruta.nombre === name);
       if (!r) return;
       isRutaEditing = true;
-      document.getElementById("modalRutaLabel").textContent = "🗺️ Editar Ruta Formativa";
       document.getElementById("rNombre").value = r.nombre;
       document.getElementById("rNombre").readOnly = true;
       document.getElementById("rDesc").value = r.descripcion;
-      modalRutaInst.show();
+
+      const modalRuta = bootstrap.Modal.getOrCreateInstance(document.getElementById("modalRut"));
+      modalRuta.show();
     }
 
     async function saveRuta(e) {
@@ -2447,7 +2487,9 @@
 
       try {
         const res = await callBaaS("saveRuta", { rutaInput: input });
-        modalRutaInst.hide();
+        
+        const modalRuta = bootstrap.Modal.getOrCreateInstance(document.getElementById("modalRut"));
+        modalRuta.hide();
         loadConfigRutas();
         showSectionAlert("rutasAlert", res.message, "success");
       } catch (err) {
@@ -2474,12 +2516,18 @@
 
     async function loadConfigComps() {
       const tbody = document.getElementById("tblConfigComps");
+      if (!tbody) return;
+
       tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">Cargando...</td></tr>`;
 
       try {
         const res = await callBaaS("getRutasYCompetencias");
+        
+        const currentTbody = document.getElementById("tblConfigComps");
+        if (!currentTbody) return;
+
         localCompsConfig = res.competencias;
-        tbody.innerHTML = res.competencias.map(c => `
+        currentTbody.innerHTML = res.competencias.map(c => `
           <tr>
             <td><strong>${c.nombre}</strong></td>
             <td><span class="badge bg-info text-dark">${c.ruta}</span></td>
@@ -2496,13 +2544,15 @@
           </tr>
         `).join("");
       } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger">Error: ${err.message}</td></tr>`;
+        const currentTbody = document.getElementById("tblConfigComps");
+        if (currentTbody) {
+          currentTbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger">Error: ${err.message}</td></tr>`;
+        }
       }
     }
 
     function openCreateCompModal() {
       isCompEditing = false;
-      document.getElementById("modalCompLabel").textContent = "⚜️ Registrar Competencia";
       document.getElementById("cNombre").value = "";
       document.getElementById("cNombre").readOnly = false;
       document.getElementById("cDesc").value = "";
@@ -2511,7 +2561,9 @@
       // Rutas
       const select = document.getElementById("cRuta");
       select.innerHTML = localRutasConfig.map(r => `<option value="${r.nombre}">${r.nombre}</option>`).join("");
-      modalCompInst.show();
+      
+      const modalComp = bootstrap.Modal.getOrCreateInstance(document.getElementById("modalCmp"));
+      modalComp.show();
     }
 
     function openEditCompModal(name) {
@@ -2519,7 +2571,6 @@
       if (!c) return;
 
       isCompEditing = true;
-      document.getElementById("modalCompLabel").textContent = "⚜️ Editar Competencia";
       document.getElementById("cNombre").value = c.nombre;
       document.getElementById("cNombre").readOnly = true;
       document.getElementById("cDesc").value = c.descripcion;
@@ -2527,7 +2578,9 @@
 
       const select = document.getElementById("cRuta");
       select.innerHTML = localRutasConfig.map(r => `<option value="${r.nombre}" ${r.nombre === c.ruta ? "selected" : ""}>${r.nombre}</option>`).join("");
-      modalCompInst.show();
+      
+      const modalComp = bootstrap.Modal.getOrCreateInstance(document.getElementById("modalCmp"));
+      modalComp.show();
     }
 
     async function saveCompetencia(e) {
@@ -2544,7 +2597,9 @@
 
       try {
         const res = await callBaaS("saveCompetencia", { compInput: input });
-        modalCompInst.hide();
+        
+        const modalComp = bootstrap.Modal.getOrCreateInstance(document.getElementById("modalCmp"));
+        modalComp.hide();
         loadConfigComps();
         showSectionAlert("compsAlert", res.message, "success");
       } catch (err) {
@@ -2569,11 +2624,17 @@
     // Pilares
     async function loadConfigPilares() {
       const tbody = document.getElementById("tblConfigPilares");
+      if (!tbody) return;
+
       tbody.innerHTML = `<tr><td colspan="2" class="text-center text-muted">Cargando...</td></tr>`;
 
       try {
         const res = await callBaaS("getPilares");
-        tbody.innerHTML = res.data.map(p => `
+        
+        const currentTbody = document.getElementById("tblConfigPilares");
+        if (!currentTbody) return;
+
+        currentTbody.innerHTML = res.data.map(p => `
           <tr>
             <td><strong>${p}</strong></td>
             <td class="text-end">
@@ -2582,13 +2643,18 @@
           </tr>
         `).join("");
       } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="2" class="text-center text-danger">Error: ${err.message}</td></tr>`;
+        const currentTbody = document.getElementById("tblConfigPilares");
+        if (currentTbody) {
+          currentTbody.innerHTML = `<tr><td colspan="2" class="text-center text-danger">Error: ${err.message}</td></tr>`;
+        }
       }
     }
 
     function openCreatePilarModal() {
       document.getElementById("pNombre").value = "";
-      modalPilarInst.show();
+      
+      const modalPilar = bootstrap.Modal.getOrCreateInstance(document.getElementById("modalPil"));
+      modalPilar.show();
     }
 
     async function savePilar(e) {
@@ -2599,7 +2665,9 @@
       const input = { nombre: document.getElementById("pNombre").value.trim() };
       try {
         const res = await callBaaS("savePilar", { pilarInput: input });
-        modalPilarInst.hide();
+        
+        const modalPilar = bootstrap.Modal.getOrCreateInstance(document.getElementById("modalPil"));
+        modalPilar.hide();
         loadConfigPilares();
         showSectionAlert("pilaresAlert", res.message, "success");
       } catch (err) {
@@ -2620,37 +2688,6 @@
         }
       }
     }
-
-    // =========================================================================
-    // INICIALIZACIÓN DE MODALES E INTEGRACIÓN FINAL (DOMContentLoaded)
-    // =========================================================================
-    let modalUserInst = null;
-    let modalEditMeetingInst = null;
-    let modalProgramInst = null;
-    let modalRutaInst = null;
-    let modalCompInst = null;
-    let modalPilarInst = null;
-
-    document.addEventListener("DOMContentLoaded", function() {
-      // Registrar e Instanciar todos los Modales de Bootstrap una sola vez de forma robusta
-      const modalUserEl = document.getElementById("modalUser");
-      if (modalUserEl) modalUserInst = new bootstrap.Modal(modalUserEl);
-      
-      const modalEditEl = document.getElementById("modalEdit");
-      if (modalEditEl) modalEditMeetingInst = new bootstrap.Modal(modalEditEl);
-
-      const modalProgEl = document.getElementById("modalProg");
-      if (modalProgEl) modalProgramInst = new bootstrap.Modal(modalProgEl);
-
-      const modalRutEl = document.getElementById("modalRut");
-      if (modalRutEl) modalRutaInst = new bootstrap.Modal(modalRutEl);
-
-      const modalCmpEl = document.getElementById("modalCmp");
-      if (modalCmpEl) modalCompInst = new bootstrap.Modal(modalCmpEl);
-
-      const modalPilEl = document.getElementById("modalPil");
-      if (modalPilEl) modalPilarInst = new bootstrap.Modal(modalPilEl);
-    });
   </script>
 </body>
 </html>
