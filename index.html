@@ -108,10 +108,10 @@
   <!-- JAVASCRIPT CLIENTE (ROUTER, STATE, VIEWS Y LLAMADAS BAAS) -->
   <script>
     // =========================================================================
-    // ESTADO GLOBAL DE LA SPA
+    // ESTADO GLOBAL DE LA SPA (URL BaaS Fija como Constante)
     // =========================================================================
     const AppState = {
-      webAppUrl: localStorage.getItem("webAppUrl") || "", // URL de ejecución de GAS
+      webAppUrl: "https://script.google.com/macros/s/AKfycby6USAFuCulNXzOpjk3SphPUu5yGT8ONm7JufBf5E1e-0EZ9wj2kI7h6Gkws0NePhEX/exec", // URL BaaS Fija de Google Apps Script
       sessionEmail: localStorage.getItem("sessionEmail") || "", // Email del rover logueado
       sessionRoles: JSON.parse(localStorage.getItem("sessionRoles") || "[]"), // Roles
       sessionName: localStorage.getItem("sessionName") || "", // Nombre
@@ -122,11 +122,6 @@
     // SERVICIO DE RED: COMUNICACIÓN HTTP (Fetch) CON GOOGLE APPS SCRIPT BAAS
     // =========================================================================
     async function callBaaS(action, params = {}) {
-      if (!AppState.webAppUrl) {
-        window.location.hash = "#baas-setup";
-        throw new Error("BaaS no configurado.");
-      }
-
       const payload = {
         action: action,
         authEmail: AppState.sessionEmail,
@@ -155,15 +150,29 @@
       }
     }
 
+    /**
+     * Muestra una alerta temporal de Bootstrap en una sección específica.
+     */
+    function showSectionAlert(id, msg, type) {
+      const el = document.getElementById(id);
+      if (!el) {
+        console.warn("showSectionAlert: Elemento con ID '" + id + "' no encontrado.");
+        return;
+      }
+      el.className = `alert alert-${type}`;
+      el.textContent = msg;
+      el.classList.remove("d-none");
+      // Desplazar suavemente hacia la alerta
+      el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      setTimeout(() => el.classList.add("d-none"), 5000);
+    }
+
     // =========================================================================
     // SISTEMA DE RUTEO POR HASHES
     // =========================================================================
     window.addEventListener("hashchange", router);
     window.addEventListener("load", function() {
-      // Si no hay URL del BaaS configurada, obligar a ir a la configuración del BaaS
-      if (!AppState.webAppUrl) {
-        window.location.hash = "#baas-setup";
-      } else if (!AppState.sessionEmail) {
+      if (!AppState.sessionEmail) {
         window.location.hash = "#login";
       } else if (window.location.hash === "" || window.location.hash === "#") {
         window.location.hash = "#program";
@@ -174,17 +183,6 @@
 
     function router() {
       const hash = window.location.hash || "#program";
-      
-      // Control de accesos generales
-      if (hash === "#baas-setup") {
-        renderBaaSSetup();
-        return;
-      }
-
-      if (!AppState.webAppUrl) {
-        window.location.hash = "#baas-setup";
-        return;
-      }
 
       if (!AppState.sessionEmail && hash !== "#login") {
         window.location.hash = "#login";
@@ -227,7 +225,7 @@
     // =========================================================================
     function renderNavbar() {
       const container = document.getElementById("navbar-container");
-      if (!AppState.sessionEmail || !AppState.webAppUrl) {
+      if (!AppState.sessionEmail) {
         container.innerHTML = ""; // No mostrar navbar si no hay sesión
         return;
       }
@@ -289,40 +287,6 @@
     }
 
     // =========================================================================
-    // VISTA: CONFIGURACIÓN BAAS DESACOPLADA (Setup)
-    // =========================================================================
-    function renderBaaSSetup() {
-      document.getElementById("app").innerHTML = `
-        <div class="row justify-content-center my-5">
-          <div class="col-md-6 col-lg-5">
-            <div class="card p-4">
-              <div class="card-body">
-                <h3 class="fw-bold text-dark text-center mb-3">⚙️ Configurar Servidor BaaS</h3>
-                <p class="text-muted small text-center mb-4">Ingresa la URL pública (/exec) de tu Web App desplegada en Google Apps Script para enlazar las APIs y la base de datos de Sheets.</p>
-                
-                <form id="formBaaS" onsubmit="saveBaaS(event)">
-                  <div class="mb-4">
-                    <label class="form-label fw-bold">URL de Apps Script BaaS (/exec)</label>
-                    <input type="url" class="form-control" id="baasUrl" required placeholder="https://script.google.com/macros/s/.../exec" value="${AppState.webAppUrl}">
-                  </div>
-                  <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold">💾 Enlazar y Conectar</button>
-                </form>
-              </div>
-            </div>
-          </div>
-        </div>`;
-    }
-
-    function saveBaaS(e) {
-      e.preventDefault();
-      const url = document.getElementById("baasUrl").value.trim();
-      localStorage.setItem("webAppUrl", url);
-      AppState.webAppUrl = url;
-      alert("¡Enlace BaaS guardado con éxito!");
-      window.location.hash = "#login";
-    }
-
-    // =========================================================================
     // VISTA: INICIO DE SESIÓN (Login)
     // =========================================================================
     function renderLogin() {
@@ -345,9 +309,6 @@
                   </div>
                   <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold" id="btnLogin">🔑 Ingresar</button>
                 </form>
-                
-                <hr class="my-4">
-                <a class="text-muted small d-block" href="#baas-setup">⚙️ Cambiar enlace de Servidor BaaS</a>
               </div>
             </div>
           </div>
@@ -648,7 +609,7 @@
           </div>
         </div>
 
-        <!-- MODAL EDITAR (Se poblará dinámicamente) -->
+        <!-- MODAL EDITAR -->
         <div class="modal fade" id="modalEdit" tabindex="-1" aria-hidden="true">
           <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content border-0 shadow">
@@ -790,16 +751,18 @@
       }
     }
 
-    // Modal de edición simplificado
-    let editModal = null;
+    // Modificaciones dinámicas de edición
     let localRovers = [];
     let localPilares = [];
     let localRutas = [];
+    let editModal = null;
 
     async function openEditModal() {
       const container = document.getElementById("modalEditBody");
       container.innerHTML = `<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>`;
-      editModal = new bootstrap.Modal(document.getElementById("modalEdit"));
+      
+      // Instanciar modal usando la instancia global inicializada
+      editModal = modalEditMeetingInst;
       editModal.show();
 
       try {
@@ -817,7 +780,7 @@
           <div class="alert alert-warning ${isRover ? "" : "d-none"}" style="font-size: 0.85rem;">
             ⚠️ <strong>Encargado:</strong> Solo puedes editar título, objetivo, observaciones y áreas. Fecha, tipo y encargados están bloqueados.
           </div>
-          <div class="row g-3">
+          <div class="row g-3 text-start">
             <div class="col-md-6">
               <label class="form-label fw-bold">Fecha</label>
               <input type="date" class="form-control" id="editFecha" value="${meetingDetails.fecha}" ${isRover ? "disabled" : ""}>
@@ -840,7 +803,7 @@
             </div>
           </div>
           
-          <div class="mt-4 ${isRover ? "d-none" : ""}">
+          <div class="mt-4 text-start ${isRover ? "d-none" : ""}">
             <label class="form-label fw-bold border-bottom d-block pb-1">Encargados (Rovers)</label>
             <div class="row g-2 p-2 bg-light rounded" style="max-height: 120px; overflow-y: auto;">
               ${localRovers.map((r, idx) => `
@@ -854,10 +817,10 @@
             </div>
           </div>
 
-          <div class="row g-3 mt-3">
+          <div class="row g-3 mt-3 text-start">
             <div class="col-md-6">
               <label class="form-label fw-bold d-block border-bottom pb-1">Pilares</label>
-              <div class="p-2 border rounded" style="max-height: 120px; overflow-y: auto;">
+              <div class="p-2 border rounded bg-white" style="max-height: 120px; overflow-y: auto;">
                 ${localPilares.map((p, idx) => `
                   <div class="form-check">
                     <input class="form-check-input edit-pilar-check" type="checkbox" value="${p}" id="editPilar_${idx}" ${meetingDetails.pilares.includes(p) ? "checked" : ""}>
@@ -868,7 +831,7 @@
             </div>
             <div class="col-md-6">
               <label class="form-label fw-bold d-block border-bottom pb-1">Áreas</label>
-              <div class="p-2 border rounded" style="max-height: 120px; overflow-y: auto;">
+              <div class="p-2 border rounded bg-white" style="max-height: 120px; overflow-y: auto;">
                 ${localRutas.map((r, idx) => `
                   <div class="form-check">
                     <input class="form-check-input edit-ruta-check" type="checkbox" value="${r.nombre}" id="editRuta_${idx}" ${meetingDetails.rutas.includes(r.nombre) ? "checked" : ""}>
@@ -879,11 +842,11 @@
             </div>
           </div>
 
-          <div class="mt-4">
+          <div class="mt-4 text-start">
             <label class="form-label fw-bold">Objetivo</label>
             <textarea class="form-control" id="editObjetivo" rows="2">${meetingDetails.objetivo}</textarea>
           </div>
-          <div class="mt-3">
+          <div class="mt-3 text-start">
             <label class="form-label fw-bold">Observaciones</label>
             <textarea class="form-control" id="editObservacion" rows="2">${meetingDetails.observacion}</textarea>
           </div>`;
@@ -960,7 +923,7 @@
 
               <form id="formMeeting" onsubmit="createMeeting(event)">
                 <h5 class="fw-bold text-dark border-bottom pb-2 mb-3">Información General</h5>
-                <div class="row g-3 mb-4">
+                <div class="row g-3 mb-4 text-start">
                   <div class="col-md-6">
                     <label class="form-label fw-semibold">Fecha de Inicio <span class="text-danger">*</span></label>
                     <input type="date" class="form-control" id="inputFecha" required onchange="onStartDateChange()">
@@ -995,16 +958,16 @@
                 </div>
 
                 <h5 class="fw-bold text-dark border-bottom pb-2 mb-3">Planificación Didáctica</h5>
-                <div class="mb-3">
+                <div class="mb-3 text-start">
                   <label class="form-label fw-semibold">Objetivo</label>
                   <textarea class="form-control" id="inputObjetivo" rows="2" placeholder="Objetivo de la sesión..."></textarea>
                 </div>
-                <div class="mb-3">
+                <div class="mb-3 text-start">
                   <label class="form-label fw-semibold">Observación</label>
                   <textarea class="form-control" id="inputObservacion" rows="2" placeholder="Recomendaciones..."></textarea>
                 </div>
 
-                <div class="row g-3 mb-4">
+                <div class="row g-3 mb-4 text-start">
                   <div class="col-md-6">
                     <label class="form-label fw-semibold d-block border-bottom pb-1">Pilares</label>
                     <div id="pilaresContainer" class="p-2 border rounded bg-white" style="max-height: 120px; overflow-y: auto;"></div>
@@ -1039,7 +1002,7 @@
           rovC.innerHTML = `<div class="col-12 text-center text-danger small">No hay Rovers registrados.</div>`;
         } else {
           rovC.innerHTML = resRovers.data.map((r, idx) => `
-            <div class="col-sm-6">
+            <div class="col-sm-6 text-start">
               <div class="form-check">
                 <input class="form-check-input rover-check" type="checkbox" value="${r.correo}" id="chkRov_${idx}">
                 <label class="form-check-label text-dark small" for="chkRov_${idx}"><strong>${r.apodo}</strong> (${r.nombreCompleto})</label>
@@ -1174,11 +1137,11 @@
                 <!-- PASO 1 -->
                 <div class="wizard-step active" id="step_1">
                   <h4 class="fw-bold mb-4 text-dark">📍 Paso 1: Registro de Asistencia</h4>
-                  <div class="mb-3">
+                  <div class="mb-3 text-start">
                     <label class="form-label fw-bold">¿Quién asistió? <span class="text-danger">*</span></label>
                     <select class="form-select form-select-lg" id="selectUsuario" required></select>
                   </div>
-                  <div class="mb-5">
+                  <div class="mb-5 text-start">
                     <label class="form-label fw-bold">¿A qué reunión asistió? <span class="text-danger">*</span></label>
                     <select class="form-select form-select-lg" id="selectReunion" required onchange="onWizardMeetingSelected()"></select>
                   </div>
@@ -1189,7 +1152,7 @@
 
                 <!-- PASO 2 -->
                 <div class="wizard-step" id="step_2">
-                  <div class="p-3 mb-4 rounded border-start border-4 border-info bg-light">
+                  <div class="p-3 mb-4 rounded border-start border-4 border-info bg-light text-start">
                     <p class="mb-1 text-muted small fw-semibold">Reunión Seleccionada:</p>
                     <h5 class="fw-bold text-dark mb-1" id="bannerMeetingName">--</h5>
                     <p class="text-muted small mb-0" id="bannerMeetingObjective">--</p>
@@ -1197,15 +1160,15 @@
                   <h4 class="fw-bold mb-3 text-dark">💬 Paso 2: Evaluación de la Actividad</h4>
                   <p class="text-muted small mb-4">Califica cualitativamente la sesión (Llenar al menos uno).</p>
                   
-                  <div class="mb-3">
+                  <div class="mb-3 text-start">
                     <label class="form-label fw-bold">Antes de la Reunión</label>
                     <textarea class="form-control" id="areaAntes" rows="2" placeholder="Preparativos..."></textarea>
                   </div>
-                  <div class="mb-3">
+                  <div class="mb-3 text-start">
                     <label class="form-label fw-bold">Durante la Reunión</label>
                     <textarea class="form-control" id="areaDurante" rows="2" placeholder="Desarrollo..."></textarea>
                   </div>
-                  <div class="mb-4">
+                  <div class="mb-4 text-start">
                     <label class="form-label fw-bold">Después de la Reunión</label>
                     <textarea class="form-control" id="areaDespues" rows="2" placeholder="Limpieza, acuerdos..."></textarea>
                   </div>
@@ -1219,16 +1182,16 @@
                 <!-- PASO 3 -->
                 <div class="wizard-step" id="step_3">
                   <h4 class="fw-bold mb-4 text-dark">⚜️ Paso 3: Plan de Adelanto</h4>
-                  <div class="mb-3">
+                  <div class="mb-3 text-start">
                     <label class="form-label fw-bold">¿Qué Hiciste Hoy? <span class="text-danger">*</span></label>
                     <textarea class="form-control" id="inputHiciste" rows="2" required></textarea>
                   </div>
-                  <div class="mb-3">
+                  <div class="mb-3 text-start">
                     <label class="form-label fw-bold">¿Qué Aprendiste Hoy? <span class="text-danger">*</span></label>
                     <textarea class="form-control" id="inputAprendiste" rows="2" required></textarea>
                   </div>
 
-                  <div class="row g-3 mb-4">
+                  <div class="row g-3 mb-4 text-start">
                     <div class="col-md-6">
                       <label class="form-label fw-bold d-block border-bottom pb-1">Rutas Trabajadas <span class="text-danger">*</span></label>
                       <div id="wizardRutasC" class="p-2 border rounded" style="max-height: 150px; overflow-y: auto;"></div>
@@ -1242,11 +1205,11 @@
 
                   <!-- Escalas Lineales de nivel -->
                   <div id="sectionNiveles" class="mb-4 d-none">
-                    <h6 class="fw-bold border-bottom pb-1 mb-3">Nivel Alcanzado por Competencia</h6>
+                    <h6 class="fw-bold border-bottom pb-1 mb-3 text-start">Nivel Alcanzado por Competencia</h6>
                     <div id="wizardNivelesC" class="d-flex flex-column gap-3"></div>
                   </div>
 
-                  <div class="mb-4">
+                  <div class="mb-4 text-start">
                     <label class="form-label fw-bold">¿Qué Hiciste que Demuestra ese Nivel? <span class="text-danger">*</span></label>
                     <textarea class="form-control" id="inputDemostracion" rows="2" required></textarea>
                   </div>
@@ -1318,7 +1281,7 @@
 
         // Checkboxes Rutas
         document.getElementById("wizardRutasC").innerHTML = wizardRutas.map((r, idx) => `
-          <div class="form-check">
+          <div class="form-check text-start">
             <input class="form-check-input wizard-ruta-check" type="checkbox" value="${r.nombre}" id="wRut_${idx}" onchange="onWizardRutasToggled()">
             <label class="form-check-label small" for="wRut_${idx}"><strong>${r.nombre}</strong></label>
           </div>
@@ -1356,7 +1319,7 @@
 
       const filtered = wizardCompetencias.filter(c => checkedRutas.includes(c.ruta));
       compC.innerHTML = filtered.map((c, idx) => `
-        <div class="form-check mb-1">
+        <div class="form-check mb-1 text-start">
           <input class="form-check-input wizard-comp-check" type="checkbox" value="${c.nombre}" id="wComp_${idx}" onchange="onWizardCompsToggled()">
           <label class="form-check-label small" for="wComp_${idx}"><strong>${c.nombre}</strong> <span class="badge bg-secondary" style="font-size:0.6rem;">${c.ruta}</span></label>
         </div>
@@ -1497,7 +1460,6 @@
     // VISTA: GESTIÓN DE INTEGRANTES (Usuarios)
     // =========================================================================
     let usersList = [];
-    let userModal = null;
 
     function renderManageUsers() {
       document.getElementById("app").innerHTML = `
@@ -1542,7 +1504,7 @@
         <!-- MODAL INTEGRANTE -->
         <div class="modal fade" id="modalUser" tabindex="-1" aria-hidden="true">
           <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content border-0 shadow">
+            <div class="modal-content border-0 shadow text-start">
               <div class="modal-header bg-dark text-white">
                 <h5 class="modal-title fw-bold" id="modalUserLabel">👤 Registrar Integrante</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
@@ -1560,7 +1522,7 @@
                     <input type="text" class="form-control" id="modalNombre" required>
                   </div>
                   <div class="mb-2">
-                    <label class="form-label fw-semibold">Asignar Roles <span class="text-danger">*</span></label>
+                    <label class="form-label fw-semibold mb-2 d-block">Asignar Roles <span class="text-danger">*</span></label>
                     <div class="form-check mb-2">
                       <input class="form-check-input role-check" type="checkbox" value="rover" id="roleRover">
                       <label class="form-check-label small" for="roleRover">⚜️ Rover</label>
@@ -1584,7 +1546,6 @@
           </div>
         </div>`;
 
-      userModal = new bootstrap.Modal(document.getElementById("modalUser"));
       loadUsers();
     }
 
@@ -1638,7 +1599,7 @@
       document.getElementById("modalNombre").value = "";
       document.getElementById("modalUserAlert").classList.add("d-none");
       document.querySelectorAll(".role-check").forEach(cb => cb.checked = false);
-      userModal.show();
+      modalUserInst.show();
     }
 
     function openEditUserModal(email) {
@@ -1655,7 +1616,7 @@
       document.querySelectorAll(".role-check").forEach(cb => {
         cb.checked = u.roles.includes(cb.value);
       });
-      userModal.show();
+      modalUserInst.show();
     }
 
     async function saveUser(e) {
@@ -1680,7 +1641,7 @@
           email: email,
           profileInput: { nombreCompleto: nombre, roles: roles }
         });
-        userModal.hide();
+        modalUserInst.hide();
         loadUsers();
         alert(res.message);
       } catch (err) {
@@ -1708,6 +1669,9 @@
     // VISTA: PERFIL E HISTORIAL (Plan de Adelanto Condicional)
     // =========================================================================
     let localProfileUser = null;
+    let profileSelectedIcon = "user";
+    let profileRutasMaster = [];
+    let profileCompsMaster = [];
 
     function renderProfile(email) {
       document.getElementById("app").innerHTML = `
@@ -1716,7 +1680,7 @@
           <p class="mt-2 text-muted">Cargando perfil...</p>
         </div>
 
-        <div id="profileContent" class="row g-4 d-none">
+        <div id="profileContent" class="row g-4 d-none text-start">
           <div class="col-lg-4">
             <div class="card p-4 text-center">
               <h4 class="fw-bold mb-3">Foto de Perfil</h4>
@@ -1734,7 +1698,7 @@
               <div class="d-flex justify-content-center gap-3 flex-wrap mb-2">
                 <span class="fs-2 icon-option" data-icon="shield" onclick="selectIcon('shield')">🛡️</span>
                 <span class="fs-2 icon-option" data-icon="campfire" onclick="selectIcon('campfire')">🔥</span>
-                <span class="fs-2 icon-option" data-icon="compass" onclick="selectIcon('campfire')">🧭</span>
+                <span class="fs-2 icon-option" data-icon="compass" onclick="selectIcon('compass')">🧭</span>
                 <span class="fs-2 icon-option" data-icon="map" onclick="selectIcon('map')">🗺️</span>
                 <span class="fs-2 icon-option" data-icon="star" onclick="selectIcon('star')">⭐</span>
                 <span class="fs-2 icon-option" data-icon="user" onclick="selectIcon('user')">👤</span>
@@ -1744,11 +1708,11 @@
 
           <div class="col-lg-8">
             <div class="card p-4 mb-4">
-              <h3 class="fw-bold text-dark mb-4">Datos del Perfil</h3>
-              <div id="profileAlert" class="alert d-none"></div>
+              <h3 class="fw-bold text-dark mb-4 border-bottom pb-2">Datos del Perfil</h3>
+              <div id="profileAlert" class="alert d-none" role="alert"></div>
 
               <form onsubmit="saveProfileDetails(event)">
-                <div class="row g-3 text-start">
+                <div class="row g-3">
                   <div class="col-md-6">
                     <label class="form-label fw-bold">Correo Electrónico</label>
                     <input type="email" class="form-control bg-light" id="profEmail" readonly>
@@ -1775,7 +1739,7 @@
             <!-- PLAN DE ADELANTO EDITABLE (Solo Jefes sobre Rovers) -->
             <div id="sectionPlanAdelanto" class="card p-4 mb-4 d-none">
               <h3 class="fw-bold text-dark mb-3">⚜️ Plan de Adelanto (Solo Jefes)</h3>
-              <div id="planAlert" class="alert d-none"></div>
+              <div id="planAlert" class="alert d-none" role="alert"></div>
               <form id="formPlanAdelanto" onsubmit="savePlanAdelanto(event)">
                 <h5 class="fw-bold border-bottom pb-2 mb-3 text-start">Fechas Importantes</h5>
                 <div class="row g-3 mb-4 text-start">
@@ -1823,7 +1787,7 @@
           </div>
         </div>
 
-        <!-- MODAL DETALLE ASISTENCIA (Solo sección Plan de Adelanto) -->
+        <!-- MODAL DETALLE ASISTENCIA -->
         <div class="modal fade" id="modalAssistance" tabindex="-1" aria-hidden="true">
           <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content">
@@ -1838,10 +1802,6 @@
 
       loadProfile(email);
     }
-
-    let profileSelectedIcon = "user";
-    let profileRutasMaster = [];
-    let profileCompsMaster = [];
 
     async function loadProfile(email) {
       try {
@@ -1875,7 +1835,7 @@
         document.getElementById("profileContent").classList.remove("d-none");
 
       } catch (err) {
-        document.getElementById("profileLoader").innerHTML = `<div class="alert alert-danger">Fallo al conectar con BaaS: ${err.message}</div>`;
+        document.getElementById("profileLoader").innerHTML = `<div class="alert alert-danger text-start">Fallo al conectar con BaaS: ${err.message}</div>`;
       }
     }
 
@@ -1904,12 +1864,11 @@
       try {
         const res = await callBaaS("saveProfile", { profileInput: input });
         showSectionAlert("profileAlert", res.message, "success");
-        btn.disabled = false;
-        btn.textContent = "Guardar Perfil";
       } catch (err) {
+        showSectionAlert("profileAlert", err.message, "danger");
+      } finally {
         btn.disabled = false;
         btn.textContent = "Guardar Perfil";
-        showSectionAlert("profileAlert", err.message, "danger");
       }
     }
 
@@ -2031,12 +1990,11 @@
       try {
         const res = await callBaaS("savePlanAdelanto", { targetEmail: localProfileUser.correo, planData: input });
         showSectionAlert("planAlert", res.message, "success");
-        btn.disabled = false;
-        btn.textContent = "Actualizar Plan de Adelanto";
       } catch (err) {
+        showSectionAlert("planAlert", err.message, "danger");
+      } finally {
         btn.disabled = false;
         btn.textContent = "Actualizar Plan de Adelanto";
-        showSectionAlert("planAlert", err.message, "danger");
       }
     }
 
@@ -2078,7 +2036,7 @@
 
       const body = document.getElementById("modalAssistBody");
       body.innerHTML = `
-        <div class="row g-3">
+        <div class="row g-3 text-start">
           <div class="col-12 border-bottom pb-2 text-start">
             <p class="mb-1 text-muted small">Reunión:</p>
             <h5 class="fw-bold text-primary mb-0">${ast.reunionNombre}</h5>
@@ -2122,7 +2080,7 @@
             <div class="p-3 bg-light rounded text-muted" style="white-space: pre-wrap; font-size:0.9rem;">${ast.detallesAdelanto.demostracionNivel}</div>
           </div>
 
-          <div class="col-md-6 mt-3">
+          <div class="col-md-6 mt-3 mx-auto">
             <div class="card p-3 bg-light text-center border-0">
               <h6 class="fw-bold mb-1 text-dark">Autoevaluación General</h6>
               <div class="fs-2 fw-bold text-primary">${ast.detallesAdelanto.autoevaluacion} / 5</div>
@@ -2154,18 +2112,18 @@
           <li class="nav-item"><button class="nav-link fw-bold" id="tab_pilares" data-bs-toggle="tab" data-bs-target="#panel_pilares" onclick="loadConfigPilares()">🔥 Pilares</button></li>
         </ul>
 
-        <div class="tab-content">
+        <div class="tab-content text-start">
           <!-- PLANTILLAS -->
           <div class="tab-pane fade show active" id="panel_templates">
             <div class="card p-4">
-              <h4 class="fw-bold mb-3 text-start">Enlaces a Plantillas de Docs</h4>
-              <div id="templatesAlert" class="alert d-none"></div>
+              <h4 class="fw-bold mb-3">Enlaces a Plantillas de Docs</h4>
+              <div id="templatesAlert" class="alert d-none" role="alert"></div>
               <form id="formTemplates" onsubmit="saveTemplates(event)">
-                <div class="mb-3 text-start">
+                <div class="mb-3">
                   <label class="form-label fw-bold">URL Plantilla de Formato de Programa (Google Docs)</label>
                   <input type="url" class="form-control" id="tmplFormato" required placeholder="https://docs.google.com/document/d/.../edit">
                 </div>
-                <div class="mb-4 text-start">
+                <div class="mb-4">
                   <label class="form-label fw-bold">URL Plantilla de Acta de Reunión (Google Docs)</label>
                   <input type="url" class="form-control" id="tmplActa" required placeholder="https://docs.google.com/document/d/.../edit">
                 </div>
@@ -2181,9 +2139,9 @@
                 <h4 class="fw-bold mb-0">Listado de Programas Anuales</h4>
                 <button class="btn btn-success btn-sm" onclick="openCreateProgramModal()">📅 Abrir Programa</button>
               </div>
-              <div id="progsAlert" class="alert d-none"></div>
+              <div id="progsAlert" class="alert d-none" role="alert"></div>
               <div class="table-responsive">
-                <table class="table table-hover align-middle text-start" style="font-size:0.95rem;">
+                <table class="table table-hover align-middle" style="font-size:0.95rem;">
                   <thead class="table-light">
                     <tr>
                       <th>Año</th>
@@ -2206,9 +2164,9 @@
                 <h4 class="fw-bold mb-0">Listado de Rutas (Áreas)</h4>
                 <button class="btn btn-success btn-sm" onclick="openCreateRutaModal()">➕ Agregar Ruta</button>
               </div>
-              <div id="rutasAlert" class="alert d-none"></div>
+              <div id="rutasAlert" class="alert d-none" role="alert"></div>
               <div class="table-responsive">
-                <table class="table table-hover align-middle text-start" style="font-size:0.95rem;">
+                <table class="table table-hover align-middle" style="font-size:0.95rem;">
                   <thead class="table-light"><tr><th>Nombre de la Ruta</th><th>Descripción</th><th class="text-end">Acciones</th></tr></thead>
                   <tbody id="tblConfigRutas"></tbody>
                 </table>
@@ -2223,9 +2181,9 @@
                 <h4 class="fw-bold mb-0">Listado de Competencias</h4>
                 <button class="btn btn-success btn-sm" onclick="openCreateCompModal()">➕ Agregar Competencia</button>
               </div>
-              <div id="compsAlert" class="alert d-none"></div>
+              <div id="compsAlert" class="alert d-none" role="alert"></div>
               <div class="table-responsive">
-                <table class="table table-hover align-middle text-start" style="font-size:0.95rem;">
+                <table class="table table-hover align-middle" style="font-size:0.95rem;">
                   <thead class="table-light"><tr><th>Competencia</th><th>Ruta Asociada</th><th>Características</th><th class="text-end">Acciones</th></tr></thead>
                   <tbody id="tblConfigComps"></tbody>
                 </table>
@@ -2240,9 +2198,9 @@
                 <h4 class="fw-bold mb-0">Listado de Pilares Scout</h4>
                 <button class="btn btn-success btn-sm" onclick="openCreatePilarModal()">➕ Agregar Pilar</button>
               </div>
-              <div id="pilaresAlert" class="alert d-none"></div>
+              <div id="pilaresAlert" class="alert d-none" role="alert"></div>
               <div class="table-responsive">
-                <table class="table table-hover align-middle text-start" style="font-size:0.95rem;">
+                <table class="table table-hover align-middle" style="font-size:0.95rem;">
                   <thead class="table-light"><tr><th>Pilar</th><th class="text-end">Acciones</th></tr></thead>
                   <tbody id="tblConfigPilares"></tbody>
                 </table>
@@ -2255,7 +2213,7 @@
         <div class="modal fade" id="modalProg" tabindex="-1" aria-hidden="true">
           <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content text-start border-0 shadow">
-              <div class="modal-header bg-dark text-white"><h5 class="modal-title fw-bold">📅 Abrir Programa Anual</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+              <div class="modal-header bg-dark text-white"><h5 class="modal-title fw-bold" id="modalProgramLabel">📅 Abrir Programa Anual</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
               <form id="formProg" onsubmit="saveProgram(event)">
                 <div class="modal-body p-4">
                   <div class="row g-3">
@@ -2265,7 +2223,7 @@
                     <div class="col-12"><label class="form-label fw-semibold">Carpeta de Actas (URL)</label><input type="url" class="form-control" id="pActaUrl" required></div>
                   </div>
                 </div>
-                <div class="modal-footer bg-light"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button><button type="submit" class="btn btn-success">Guardar Programa</button></div>
+                <div class="modal-footer bg-light"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button><button type="submit" class="btn btn-success" id="btnSubmitProgram">Guardar Programa</button></div>
               </form>
             </div>
           </div>
@@ -2274,14 +2232,14 @@
         <!-- MODAL RUTA -->
         <div class="modal fade" id="modalRut" tabindex="-1" aria-hidden="true">
           <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content text-start">
-              <div class="modal-header bg-dark text-white"><h5 class="modal-title fw-bold">🗺️ Ruta</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+            <div class="modal-content text-start border-0 shadow">
+              <div class="modal-header bg-dark text-white"><h5 class="modal-title fw-bold" id="modalRutaLabel">🗺️ Ruta</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
               <form id="formRut" onsubmit="saveRuta(event)">
                 <div class="modal-body p-4">
                   <div class="mb-3"><label class="form-label fw-semibold">Nombre</label><input type="text" class="form-control" id="rNombre" required></div>
                   <div class="mb-3"><label class="form-label fw-semibold">Descripción</label><textarea class="form-control" id="rDesc" rows="2"></textarea></div>
                 </div>
-                <div class="modal-footer bg-light"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar Ruta</button></div>
+                <div class="modal-footer bg-light"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button><button type="submit" class="btn btn-primary" id="btnSubmitRuta">Guardar Ruta</button></div>
               </form>
             </div>
           </div>
@@ -2290,8 +2248,8 @@
         <!-- MODAL COMPETENCIA -->
         <div class="modal fade" id="modalCmp" tabindex="-1" aria-hidden="true">
           <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content text-start">
-              <div class="modal-header bg-dark text-white"><h5 class="modal-title fw-bold">⚜️ Competencia</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+            <div class="modal-content text-start border-0 shadow">
+              <div class="modal-header bg-dark text-white"><h5 class="modal-title fw-bold" id="modalCompLabel">⚜️ Competencia</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
               <form id="formCmp" onsubmit="saveCompetencia(event)">
                 <div class="modal-body p-4">
                   <div class="mb-3"><label class="form-label fw-semibold">Nombre</label><input type="text" class="form-control" id="cNombre" required></div>
@@ -2299,7 +2257,7 @@
                   <div class="mb-3"><label class="form-label fw-semibold">Descripción</label><textarea class="form-control" id="cDesc" rows="2"></textarea></div>
                   <div class="mb-3"><label class="form-label fw-semibold">Características (Lista por líneas)</label><textarea class="form-control" id="cCarac" rows="3"></textarea></div>
                 </div>
-                <div class="modal-footer bg-light"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar Competencia</button></div>
+                <div class="modal-footer bg-light"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button><button type="submit" class="btn btn-primary" id="btnSubmitComp">Guardar Competencia</button></div>
               </form>
             </div>
           </div>
@@ -2308,13 +2266,13 @@
         <!-- MODAL PILAR -->
         <div class="modal fade" id="modalPil" tabindex="-1" aria-hidden="true">
           <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content text-start">
-              <div class="modal-header bg-dark text-white"><h5 class="modal-title fw-bold">🔥 Pilar</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+            <div class="modal-content text-start border-0 shadow">
+              <div class="modal-header bg-dark text-white"><h5 class="modal-title fw-bold" id="modalPilarLabel">🔥 Pilar</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
               <form id="formPil" onsubmit="savePilar(event)">
                 <div class="modal-body p-4">
                   <div class="mb-3"><label class="form-label fw-semibold">Nombre</label><input type="text" class="form-control" id="pNombre" required></div>
                 </div>
-                <div class="modal-footer bg-light"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar Pilar</button></div>
+                <div class="modal-footer bg-light"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button><button type="submit" class="btn btn-primary" id="btnSubmitPilar">Guardar Pilar</button></div>
               </form>
             </div>
           </div>
@@ -2357,13 +2315,11 @@
     }
 
     // Programas
-    let modProg = null;
     let localProgs = [];
 
     async function loadConfigPrograms() {
       const tbody = document.getElementById("tblConfigPrograms");
       tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted">Cargando...</td></tr>`;
-      modProg = new bootstrap.Modal(document.getElementById("modalProg"));
 
       try {
         const res = await callBaaS("getPrograms");
@@ -2384,28 +2340,34 @@
 
     function openCreateProgramModal() {
       isProgramEditing = false;
+      document.getElementById("modalProgramLabel").textContent = "📅 Abrir Programa Anual";
       document.getElementById("pAnio").value = new Date().getFullYear();
       document.getElementById("pAnio").readOnly = false;
       document.getElementById("pFechaIn").value = "";
       document.getElementById("pFormUrl").value = "";
       document.getElementById("pActaUrl").value = "";
-      modProg.show();
+      modalProgramInst.show();
     }
 
     function openEditProgramModal(year) {
       const p = localProgs.find(prog => prog.anio === year);
       if (!p) return;
       isProgramEditing = true;
+      document.getElementById("modalProgramLabel").textContent = "📅 Editar Programa Anual";
       document.getElementById("pAnio").value = p.anio;
       document.getElementById("pAnio").readOnly = true;
       document.getElementById("pFechaIn").value = p.fechaInicio;
       document.getElementById("pFormUrl").value = p.carpetaFormatosUrl;
       document.getElementById("pActaUrl").value = p.carpetaActasUrl;
-      modProg.show();
+      modalProgramInst.show();
     }
 
     async function saveProgram(e) {
       e.preventDefault();
+      const btn = document.getElementById("btnSubmitProgram");
+      btn.disabled = true;
+      btn.textContent = "Guardando...";
+
       const input = {
         anio: document.getElementById("pAnio").value,
         fechaInicio: document.getElementById("pFechaIn").value,
@@ -2415,22 +2377,23 @@
 
       try {
         const res = await callBaaS("saveProgram", { programInput: input });
-        modProg.hide();
+        modalProgramInst.hide();
         loadConfigPrograms();
         showSectionAlert("progsAlert", res.message, "success");
       } catch (err) {
         alert("Error: " + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Guardar Programa";
       }
     }
 
     // Rutas
-    let modRut = null;
     let localRutasConfig = [];
 
     async function loadConfigRutas() {
       const tbody = document.getElementById("tblConfigRutas");
       tbody.innerHTML = `<tr><td colspan="3" class="text-center text-muted">Cargando...</td></tr>`;
-      modRut = new bootstrap.Modal(document.getElementById("modalRut"));
 
       try {
         const res = await callBaaS("getRutasYCompetencias");
@@ -2454,24 +2417,29 @@
 
     function openCreateRutaModal() {
       isRutaEditing = false;
+      document.getElementById("modalRutaLabel").textContent = "🗺️ Registrar Ruta Formativa";
       document.getElementById("rNombre").value = "";
       document.getElementById("rNombre").readOnly = false;
       document.getElementById("rDesc").value = "";
-      modRut.show();
+      modalRutaInst.show();
     }
 
     function openEditRutaModal(name) {
       const r = localRutasConfig.find(ruta => ruta.nombre === name);
       if (!r) return;
       isRutaEditing = true;
+      document.getElementById("modalRutaLabel").textContent = "🗺️ Editar Ruta Formativa";
       document.getElementById("rNombre").value = r.nombre;
       document.getElementById("rNombre").readOnly = true;
       document.getElementById("rDesc").value = r.descripcion;
-      modRut.show();
+      modalRutaInst.show();
     }
 
     async function saveRuta(e) {
       e.preventDefault();
+      const btn = document.getElementById("btnSubmitRuta");
+      btn.disabled = true;
+
       const input = {
         nombre: document.getElementById("rNombre").value.trim(),
         descripcion: document.getElementById("rDesc").value.trim()
@@ -2479,11 +2447,13 @@
 
       try {
         const res = await callBaaS("saveRuta", { rutaInput: input });
-        modRut.hide();
+        modalRutaInst.hide();
         loadConfigRutas();
         showSectionAlert("rutasAlert", res.message, "success");
       } catch (err) {
         alert("Error: " + err.message);
+      } finally {
+        btn.disabled = false;
       }
     }
 
@@ -2500,13 +2470,11 @@
     }
 
     // Competencias
-    let modCmp = null;
     let localCompsConfig = [];
 
     async function loadConfigComps() {
       const tbody = document.getElementById("tblConfigComps");
       tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">Cargando...</td></tr>`;
-      modCmp = new bootstrap.Modal(document.getElementById("modalCmp"));
 
       try {
         const res = await callBaaS("getRutasYCompetencias");
@@ -2534,6 +2502,7 @@
 
     function openCreateCompModal() {
       isCompEditing = false;
+      document.getElementById("modalCompLabel").textContent = "⚜️ Registrar Competencia";
       document.getElementById("cNombre").value = "";
       document.getElementById("cNombre").readOnly = false;
       document.getElementById("cDesc").value = "";
@@ -2542,7 +2511,7 @@
       // Rutas
       const select = document.getElementById("cRuta");
       select.innerHTML = localRutasConfig.map(r => `<option value="${r.nombre}">${r.nombre}</option>`).join("");
-      modCmp.show();
+      modalCompInst.show();
     }
 
     function openEditCompModal(name) {
@@ -2550,6 +2519,7 @@
       if (!c) return;
 
       isCompEditing = true;
+      document.getElementById("modalCompLabel").textContent = "⚜️ Editar Competencia";
       document.getElementById("cNombre").value = c.nombre;
       document.getElementById("cNombre").readOnly = true;
       document.getElementById("cDesc").value = c.descripcion;
@@ -2557,11 +2527,14 @@
 
       const select = document.getElementById("cRuta");
       select.innerHTML = localRutasConfig.map(r => `<option value="${r.nombre}" ${r.nombre === c.ruta ? "selected" : ""}>${r.nombre}</option>`).join("");
-      modCmp.show();
+      modalCompInst.show();
     }
 
     async function saveCompetencia(e) {
       e.preventDefault();
+      const btn = document.getElementById("btnSubmitComp");
+      btn.disabled = true;
+
       const input = {
         nombre: document.getElementById("cNombre").value.trim(),
         ruta: document.getElementById("cRuta").value,
@@ -2571,11 +2544,13 @@
 
       try {
         const res = await callBaaS("saveCompetencia", { compInput: input });
-        modCmp.hide();
+        modalCompInst.hide();
         loadConfigComps();
         showSectionAlert("compsAlert", res.message, "success");
       } catch (err) {
         alert("Error: " + err.message);
+      } finally {
+        btn.disabled = false;
       }
     }
 
@@ -2592,12 +2567,9 @@
     }
 
     // Pilares
-    let modPil = null;
-
     async function loadConfigPilares() {
       const tbody = document.getElementById("tblConfigPilares");
       tbody.innerHTML = `<tr><td colspan="2" class="text-center text-muted">Cargando...</td></tr>`;
-      modPil = new bootstrap.Modal(document.getElementById("modalPilar"));
 
       try {
         const res = await callBaaS("getPilares");
@@ -2616,19 +2588,24 @@
 
     function openCreatePilarModal() {
       document.getElementById("pNombre").value = "";
-      modPil.show();
+      modalPilarInst.show();
     }
 
     async function savePilar(e) {
       e.preventDefault();
+      const btn = document.getElementById("btnSubmitPilar");
+      btn.disabled = true;
+
       const input = { nombre: document.getElementById("pNombre").value.trim() };
       try {
         const res = await callBaaS("savePilar", { pilarInput: input });
-        modPil.hide();
+        modalPilarInst.hide();
         loadConfigPilares();
         showSectionAlert("pilaresAlert", res.message, "success");
       } catch (err) {
         alert("Error: " + err.message);
+      } finally {
+        btn.disabled = false;
       }
     }
 
@@ -2643,6 +2620,37 @@
         }
       }
     }
+
+    // =========================================================================
+    // INICIALIZACIÓN DE MODALES E INTEGRACIÓN FINAL (DOMContentLoaded)
+    // =========================================================================
+    let modalUserInst = null;
+    let modalEditMeetingInst = null;
+    let modalProgramInst = null;
+    let modalRutaInst = null;
+    let modalCompInst = null;
+    let modalPilarInst = null;
+
+    document.addEventListener("DOMContentLoaded", function() {
+      // Registrar e Instanciar todos los Modales de Bootstrap una sola vez de forma robusta
+      const modalUserEl = document.getElementById("modalUser");
+      if (modalUserEl) modalUserInst = new bootstrap.Modal(modalUserEl);
+      
+      const modalEditEl = document.getElementById("modalEdit");
+      if (modalEditEl) modalEditMeetingInst = new bootstrap.Modal(modalEditEl);
+
+      const modalProgEl = document.getElementById("modalProg");
+      if (modalProgEl) modalProgramInst = new bootstrap.Modal(modalProgEl);
+
+      const modalRutEl = document.getElementById("modalRut");
+      if (modalRutEl) modalRutaInst = new bootstrap.Modal(modalRutEl);
+
+      const modalCmpEl = document.getElementById("modalCmp");
+      if (modalCmpEl) modalCompInst = new bootstrap.Modal(modalCmpEl);
+
+      const modalPilEl = document.getElementById("modalPil");
+      if (modalPilEl) modalPilarInst = new bootstrap.Modal(modalPilEl);
+    });
   </script>
 </body>
 </html>
