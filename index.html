@@ -1,0 +1,2648 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Portal Clan Akhenatón v2</title>
+  
+  <!-- Bootstrap 5 CSS via CDN -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  
+  <!-- Bootstrap Icons via CDN -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+
+  <style>
+    body {
+      background-color: #f8f9fa;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .navbar-brand {
+      font-weight: bold;
+    }
+    .card {
+      border: none;
+      border-radius: 10px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+    }
+    .wizard-step {
+      display: none;
+    }
+    .wizard-step.active {
+      display: block;
+    }
+    .step-indicator {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background-color: #e9ecef;
+      color: #6c757d;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      margin: 0 auto 10px;
+    }
+    .step-indicator.active {
+      background-color: #0d6efd;
+      color: white;
+    }
+    .step-indicator.completed {
+      background-color: #198754;
+      color: white;
+    }
+    .icon-option {
+      cursor: pointer;
+      border: 2px solid transparent;
+      border-radius: 50%;
+      padding: 5px;
+      transition: all 0.2s ease;
+    }
+    .icon-option:hover {
+      background-color: #e9ecef;
+    }
+    .icon-option.selected {
+      border-color: #0d6efd;
+      background-color: #e2eafc;
+    }
+    .profile-avatar-img {
+      width: 120px;
+      height: 120px;
+      object-fit: cover;
+      border-radius: 50%;
+    }
+    .avatar-cell {
+      width: 40px;
+      height: 40px;
+      object-fit: cover;
+      border-radius: 50%;
+    }
+    .linear-scale-box {
+      background-color: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 8px;
+    }
+    .evaluation-card {
+      border-left: 4px solid #0d6efd;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- NAVBAR (Se renderiza dinámicamente) -->
+  <div id="navbar-container"></div>
+
+  <!-- CONTENEDOR PRINCIPAL (Inyección dinámica de la SPA) -->
+  <main class="container my-5 flex-grow-1" id="app"></main>
+
+  <footer class="text-center py-4 bg-dark text-white-50 mt-auto" style="font-size: 0.85rem;">
+    <div class="container">
+      ⚜️ Portal Clan Akhenatón v2 — Arquitectura BaaS Desacoplada (Static GitHub Pages)
+    </div>
+  </footer>
+
+  <!-- Bootstrap 5 Bundle JS (con Popper) via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+  <!-- JAVASCRIPT CLIENTE (ROUTER, STATE, VIEWS Y LLAMADAS BAAS) -->
+  <script>
+    // =========================================================================
+    // ESTADO GLOBAL DE LA SPA
+    // =========================================================================
+    const AppState = {
+      webAppUrl: localStorage.getItem("webAppUrl") || "", // URL de ejecución de GAS
+      sessionEmail: localStorage.getItem("sessionEmail") || "", // Email del rover logueado
+      sessionRoles: JSON.parse(localStorage.getItem("sessionRoles") || "[]"), // Roles
+      sessionName: localStorage.getItem("sessionName") || "", // Nombre
+      currentYear: new Date().getFullYear()
+    };
+
+    // =========================================================================
+    // SERVICIO DE RED: COMUNICACIÓN HTTP (Fetch) CON GOOGLE APPS SCRIPT BAAS
+    // =========================================================================
+    async function callBaaS(action, params = {}) {
+      if (!AppState.webAppUrl) {
+        window.location.hash = "#baas-setup";
+        throw new Error("BaaS no configurado.");
+      }
+
+      const payload = {
+        action: action,
+        authEmail: AppState.sessionEmail,
+        params: params
+      };
+
+      try {
+        const response = await fetch(AppState.webAppUrl, {
+          method: "POST",
+          body: JSON.stringify(payload),
+          mode: "cors"
+        });
+
+        if (!response.ok) {
+          throw new Error(`Error HTTP: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.success === false) {
+          throw new Error(data.message);
+        }
+        return data;
+      } catch (err) {
+        console.error("callBaaS Error:", err.message);
+        throw err;
+      }
+    }
+
+    // =========================================================================
+    // SISTEMA DE RUTEO POR HASHES
+    // =========================================================================
+    window.addEventListener("hashchange", router);
+    window.addEventListener("load", function() {
+      // Si no hay URL del BaaS configurada, obligar a ir a la configuración del BaaS
+      if (!AppState.webAppUrl) {
+        window.location.hash = "#baas-setup";
+      } else if (!AppState.sessionEmail) {
+        window.location.hash = "#login";
+      } else if (window.location.hash === "" || window.location.hash === "#") {
+        window.location.hash = "#program";
+      } else {
+        router();
+      }
+    });
+
+    function router() {
+      const hash = window.location.hash || "#program";
+      
+      // Control de accesos generales
+      if (hash === "#baas-setup") {
+        renderBaaSSetup();
+        return;
+      }
+
+      if (!AppState.webAppUrl) {
+        window.location.hash = "#baas-setup";
+        return;
+      }
+
+      if (!AppState.sessionEmail && hash !== "#login") {
+        window.location.hash = "#login";
+        return;
+      }
+
+      renderNavbar(); // Asegurar navbar actualizado
+
+      // Enrutamientos dinámicos
+      if (hash === "#login") {
+        renderLogin();
+      } else if (hash === "#program") {
+        renderProgram();
+      } else if (hash.startsWith("#meeting/")) {
+        const id = hash.split("/")[1];
+        renderMeetingDetails(id);
+      } else if (hash === "#create-meeting") {
+        renderCreateMeeting();
+      } else if (hash === "#asistencia") {
+        renderAsistencia();
+      } else if (hash === "#users") {
+        renderManageUsers();
+      } else if (hash.startsWith("#profile/")) {
+        const email = decodeURIComponent(hash.split("/")[1]);
+        renderProfile(email);
+      } else if (hash === "#config") {
+        renderManageConfig();
+      } else {
+        document.getElementById("app").innerHTML = `
+          <div class="alert alert-warning text-center">
+            <h4>Página no encontrada</h4>
+            <p>La sección seleccionada no existe.</p>
+            <a class="btn btn-primary" href="#program">Volver al Programa</a>
+          </div>`;
+      }
+    }
+
+    // =========================================================================
+    // RENDER DE MENÚ DE NAVEGACIÓN (Navbar)
+    // =========================================================================
+    function renderNavbar() {
+      const container = document.getElementById("navbar-container");
+      if (!AppState.sessionEmail || !AppState.webAppUrl) {
+        container.innerHTML = ""; // No mostrar navbar si no hay sesión
+        return;
+      }
+
+      const isElevated = AppState.sessionRoles.indexOf("jefe") !== -1 || AppState.sessionRoles.indexOf("director") !== -1;
+
+      container.innerHTML = `
+        <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm">
+          <div class="container">
+            <a class="navbar-brand d-flex align-items-center" href="#program">
+              <span class="me-2">⚜️</span>
+              <span class="fw-bold">Clan Akhenatón v2</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+              <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <div class="collapse navbar-collapse justify-content-between" id="navbarNav">
+              <ul class="navbar-nav">
+                <li class="nav-item">
+                  <a class="nav-link ${window.location.hash.startsWith('#program') ? 'active' : ''}" href="#program">📅 Programa</a>
+                </li>
+                ${isElevated ? `
+                  <li class="nav-item">
+                    <a class="nav-link ${window.location.hash === '#users' ? 'active' : ''}" href="#users">👥 Usuarios</a>
+                  </li>
+                  <li class="nav-item">
+                    <a class="nav-link ${window.location.hash === '#config' ? 'active' : ''}" href="#config">⚙️ Configuraciones</a>
+                  </li>
+                ` : ""}
+              </ul>
+              
+              <div class="navbar-nav align-items-center">
+                <span class="navbar-text me-3 text-light d-none d-lg-inline" style="font-size: 0.9rem;">
+                  Hola, <strong class="text-white">${AppState.sessionName}</strong> 
+                  <span class="badge bg-secondary ms-1" style="font-size: 0.75rem;">
+                    ${AppState.sessionRoles.join('/')}
+                  </span>
+                </span>
+                
+                <a class="btn btn-outline-light btn-sm px-3" href="#profile/${encodeURIComponent(AppState.sessionEmail)}">
+                  👤 Mi Perfil
+                </a>
+                <button class="btn btn-link text-white-50 btn-sm ms-2" onclick="logout()">Salir</button>
+              </div>
+            </div>
+          </div>
+        </nav>`;
+    }
+
+    function logout() {
+      localStorage.removeItem("sessionEmail");
+      localStorage.removeItem("sessionRoles");
+      localStorage.removeItem("sessionName");
+      AppState.sessionEmail = "";
+      AppState.sessionRoles = [];
+      AppState.sessionName = "";
+      window.location.hash = "#login";
+    }
+
+    // =========================================================================
+    // VISTA: CONFIGURACIÓN BAAS DESACOPLADA (Setup)
+    // =========================================================================
+    function renderBaaSSetup() {
+      document.getElementById("app").innerHTML = `
+        <div class="row justify-content-center my-5">
+          <div class="col-md-6 col-lg-5">
+            <div class="card p-4">
+              <div class="card-body">
+                <h3 class="fw-bold text-dark text-center mb-3">⚙️ Configurar Servidor BaaS</h3>
+                <p class="text-muted small text-center mb-4">Ingresa la URL pública (/exec) de tu Web App desplegada en Google Apps Script para enlazar las APIs y la base de datos de Sheets.</p>
+                
+                <form id="formBaaS" onsubmit="saveBaaS(event)">
+                  <div class="mb-4">
+                    <label class="form-label fw-bold">URL de Apps Script BaaS (/exec)</label>
+                    <input type="url" class="form-control" id="baasUrl" required placeholder="https://script.google.com/macros/s/.../exec" value="${AppState.webAppUrl}">
+                  </div>
+                  <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold">💾 Enlazar y Conectar</button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function saveBaaS(e) {
+      e.preventDefault();
+      const url = document.getElementById("baasUrl").value.trim();
+      localStorage.setItem("webAppUrl", url);
+      AppState.webAppUrl = url;
+      alert("¡Enlace BaaS guardado con éxito!");
+      window.location.hash = "#login";
+    }
+
+    // =========================================================================
+    // VISTA: INICIO DE SESIÓN (Login)
+    // =========================================================================
+    function renderLogin() {
+      document.getElementById("app").innerHTML = `
+        <div class="row justify-content-center my-5">
+          <div class="col-md-6 col-lg-4">
+            <div class="card p-4 text-center">
+              <div class="card-body">
+                <span class="fs-1">⚜️</span>
+                <h3 class="fw-bold mt-2 text-dark">Clan Akhenatón</h3>
+                <p class="text-muted small">BaaS & SPA Desacoplada v2</p>
+
+                <div id="loginAlert" class="alert d-none text-start" role="alert"></div>
+
+                <form onsubmit="login(event)">
+                  <div class="mb-4 text-start">
+                    <label class="form-label fw-semibold">Correo Electrónico</label>
+                    <input type="email" class="form-control" id="loginEmail" required placeholder="rover@gmail.com">
+                    <small class="text-muted small mt-1 d-block">Registrado en la base de datos de usuarios.</small>
+                  </div>
+                  <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold" id="btnLogin">🔑 Ingresar</button>
+                </form>
+                
+                <hr class="my-4">
+                <a class="text-muted small d-block" href="#baas-setup">⚙️ Cambiar enlace de Servidor BaaS</a>
+              </div>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    async function login(e) {
+      e.preventDefault();
+      const email = document.getElementById("loginEmail").value.trim().toLowerCase();
+      const btn = document.getElementById("btnLogin");
+      const alertBox = document.getElementById("loginAlert");
+
+      alertBox.classList.add("d-none");
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span> Autenticando...`;
+
+      try {
+        const res = await callBaaS("login", { email: email });
+        
+        // Guardar sesión
+        localStorage.setItem("sessionEmail", email);
+        localStorage.setItem("sessionRoles", JSON.stringify(res.roles));
+        localStorage.setItem("sessionName", res.nombre);
+
+        AppState.sessionEmail = email;
+        AppState.sessionRoles = res.roles;
+        AppState.sessionName = res.nombre;
+
+        window.location.hash = "#program";
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "🔑 Ingresar";
+        alertBox.className = "alert alert-danger text-start";
+        alertBox.textContent = "Error: " + err.message;
+        alertBox.classList.remove("d-none");
+      }
+    }
+
+    // =========================================================================
+    // VISTA: CALENDARIO DE PROGRAMA (Dashboard)
+    // =========================================================================
+    function renderProgram() {
+      document.getElementById("app").innerHTML = `
+        <div class="row mb-4 align-items-center justify-content-between">
+          <div class="col-12 col-md-6">
+            <h2 class="fw-bold">📅 Calendario del Programa</h2>
+            <p class="text-muted">Planificación del clan gestionada en Sheets y renderizada de forma estática.</p>
+          </div>
+          <div class="col-12 col-md-6 text-md-end">
+            <div class="d-flex gap-2 justify-content-md-end flex-wrap">
+              <a class="btn btn-primary d-inline-flex align-items-center gap-2" href="#asistencia">
+                ✍️ Registrar Asistencia
+              </a>
+              ${AppState.sessionRoles.indexOf("director") !== -1 ? `
+                <a class="btn btn-success d-inline-flex align-items-center gap-2" href="#create-meeting">
+                  ➕ Crear Reunión
+                </a>
+              ` : ""}
+            </div>
+          </div>
+        </div>
+
+        <!-- FILTROS -->
+        <div class="card mb-4 p-3">
+          <div class="row g-3 align-items-center">
+            <div class="col-md-3">
+              <label class="form-label fw-semibold mb-1" style="font-size:0.9rem;">Filtrar por Año</label>
+              <select class="form-select" id="filterYear" onchange="loadCalendar()">
+                <option value="2026" ${AppState.currentYear === 2026 ? "selected" : ""}>2026</option>
+                <option value="2025" ${AppState.currentYear === 2025 ? "selected" : ""}>2025</option>
+                <option value="2024" ${AppState.currentYear === 2024 ? "selected" : ""}>2024</option>
+              </select>
+            </div>
+            <div class="col-md-5 d-flex align-items-end h-100 pb-1">
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="myMeetingsOnly" onchange="filterLocalMeetings()">
+                <label class="form-check-label fw-semibold text-dark" style="cursor:pointer;" for="myMeetingsOnly">
+                  🙋 Mostrar solo mis reuniones (como Encargado)
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TABLA DE CALENDARIO -->
+        <div class="card">
+          <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 text-start">
+              <thead class="table-light">
+                <tr>
+                  <th scope="col" style="width: 125px;">Mes</th>
+                  <th scope="col" style="width: 80px;" class="text-center">Día</th>
+                  <th scope="col">Reunión</th>
+                  <th scope="col">Objetivo</th>
+                  <th scope="col">Encargados</th>
+                  <th scope="col" style="width: 100px;" class="text-center">¿Salida?</th>
+                  <th scope="col">Observación</th>
+                </tr>
+              </thead>
+              <tbody id="calendarTableBody">
+                <tr>
+                  <td colspan="7" class="text-center py-4 text-muted">
+                    <div class="spinner-border text-primary spinner-border-sm me-2"></div>
+                    Conectando con BaaS...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+
+      loadCalendar();
+    }
+
+    let originalMeetingsList = [];
+
+    async function loadCalendar() {
+      const year = document.getElementById("filterYear").value;
+      const tbody = document.getElementById("calendarTableBody");
+
+      try {
+        const res = await callBaaS("getMeetings", { year: year });
+        originalMeetingsList = res.data;
+        renderCalendarRows(res.data);
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center py-4 text-danger">Error BaaS: ${err.message}</td></tr>`;
+      }
+    }
+
+    function renderCalendarRows(list) {
+      const tbody = document.getElementById("calendarTableBody");
+      tbody.innerHTML = "";
+
+      if (list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center py-4 text-muted">No se registran actividades programadas para este año.</td></tr>`;
+        return;
+      }
+
+      list.forEach(r => {
+        const tr = document.createElement("tr");
+        tr.style.cursor = "pointer";
+        tr.onclick = function() { window.location.hash = `#meeting/${r.id}`; };
+
+        let mesClass = "bg-secondary";
+        const cleanMes = r.mes.toUpperCase();
+        if (["ENERO","FEBRERO","MARZO"].includes(cleanMes)) mesClass = "bg-dark bg-opacity-75";
+        if (["ABRIL","MAYO","JUNIO"].includes(cleanMes)) mesClass = "bg-primary";
+        if (["JULIO","AGOSTO","SEPTIEMBRE"].includes(cleanMes)) mesClass = "bg-success";
+        if (["OCTUBRE","NOVIEMBRE","DICIEMBRE"].includes(cleanMes)) mesClass = "bg-warning text-dark";
+
+        tr.innerHTML = `
+          <td><span class="badge ${mesClass} px-2 py-1 w-100 text-uppercase" style="font-size:0.75rem;">${r.mes}</span></td>
+          <td class="fw-bold fs-5 text-center text-dark">${r.dia}</td>
+          <td>
+            <div class="fw-bold text-primary" style="font-size:0.98rem;">${r.nombre}</div>
+            <small class="text-muted">${r.tipo.toUpperCase()}</small>
+          </td>
+          <td class="text-muted small text-truncate" style="max-width: 250px;">${r.objetivo || '<i>Sin definir</i>'}</td>
+          <td><span class="badge bg-light text-dark border border-secondary px-2 py-1" style="font-size:0.8rem;">${r.encargadosApodos}</span></td>
+          <td class="text-center">${r.esSalida === "SÍ" ? `<span class="text-success fw-bold">SÍ</span>` : `<span class="text-danger fw-bold">NO</span>`}</td>
+          <td class="text-muted small text-truncate" style="max-width: 200px;">${r.observacion || '<i>Sin definir</i>'}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function filterLocalMeetings() {
+      const myOnly = document.getElementById("myMeetingsOnly").checked;
+      if (myOnly) {
+        const filtered = originalMeetingsList.filter(r => {
+          return r.encargados.some(correo => correo.trim().toLowerCase() === AppState.sessionEmail);
+        });
+        renderCalendarRows(filtered);
+      } else {
+        renderCalendarRows(originalMeetingsList);
+      }
+    }
+
+    // =========================================================================
+    // VISTA: DETALLE DE REUNIÓN
+    // =========================================================================
+    let meetingDetails = null;
+
+    function renderMeetingDetails(id) {
+      document.getElementById("app").innerHTML = `
+        <div class="d-flex align-items-center gap-3 border-bottom pb-3 mb-4 flex-wrap justify-content-between">
+          <div class="d-flex align-items-center gap-3">
+            <a class="btn btn-outline-secondary btn-sm" href="#program">⬅️ Volver al Programa</a>
+            <h2 class="fw-bold mb-0" id="headerMeetingName">Cargando...</h2>
+          </div>
+          <div class="d-flex gap-2">
+            <button id="btnEditMeeting" class="btn btn-primary d-none" onclick="openEditModal()">✏️ Editar</button>
+            <button id="btnDeleteMeeting" class="btn btn-danger d-none" onclick="deleteMeeting()">🗑️ Eliminar</button>
+          </div>
+        </div>
+
+        <div id="loader" class="text-center py-5">
+          <div class="spinner-border text-primary" role="status"></div>
+          <p class="mt-2 text-muted">Cargando detalles de la reunión...</p>
+        </div>
+
+        <div id="meetingContent" class="d-none">
+          <div class="row g-4">
+            <div class="col-lg-8">
+              <div class="card p-4 mb-4">
+                <h4 class="fw-bold text-dark border-bottom pb-2 mb-3">Información General</h4>
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <span class="text-muted d-block small fw-semibold">Número Único:</span>
+                    <span id="txtNumeroUnico" class="fw-bold fs-5 text-primary">--</span>
+                  </div>
+                  <div class="col-md-6">
+                    <span class="text-muted d-block small fw-semibold">Tipo de Actividad:</span>
+                    <span id="txtTipo" class="badge bg-secondary fs-6 text-uppercase">--</span>
+                  </div>
+                  <div class="col-md-6">
+                    <span class="text-muted d-block small fw-semibold">Fecha:</span>
+                    <span id="txtFecha" class="fw-bold text-dark">--</span>
+                  </div>
+                  <div class="col-md-6" id="txtFechaFinGroup">
+                    <span class="text-muted d-block small fw-semibold">Fecha Fin:</span>
+                    <span id="txtFechaFin" class="fw-bold text-dark">--</span>
+                  </div>
+                  <div class="col-12">
+                    <span class="text-muted d-block small fw-semibold">Lugar:</span>
+                    <span id="txtLugar" class="fw-bold text-dark">--</span>
+                  </div>
+                  <div class="col-12 mt-3 border-top pt-2">
+                    <span class="text-muted d-block small fw-semibold">Objetivo:</span>
+                    <p id="txtObjetivo" class="text-dark mb-0" style="white-space: pre-wrap;">--</p>
+                  </div>
+                  <div class="col-12 mt-3 border-top pt-2">
+                    <span class="text-muted d-block small fw-semibold">Observación:</span>
+                    <p id="txtObservacion" class="text-dark mb-0" style="white-space: pre-wrap;">--</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- DOCUMENTACIÓN EN DRIVE / ENLACES ASOCIADOS -->
+              <div id="cardDocuments" class="card p-4 mb-4 d-none">
+                <h4 class="fw-bold text-dark border-bottom pb-2 mb-3">📁 Documentación del Programa</h4>
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <div class="p-3 border rounded bg-light d-flex flex-column h-100 justify-content-between">
+                      <div>
+                        <h6 class="fw-bold text-dark mb-1">📄 Formato de Programa</h6>
+                        <small class="text-muted d-block mb-3">Google Docs creado automáticamente.</small>
+                      </div>
+                      <div class="d-flex gap-2">
+                        <a id="btnDocFormato" href="#" target="_blank" class="btn btn-outline-primary btn-sm flex-grow-1">Abrir Doc</a>
+                        <a id="btnFolderFormato" href="#" target="_blank" class="btn btn-outline-secondary btn-sm">📁 Carpeta</a>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-md-6">
+                    <div class="p-3 border rounded bg-light d-flex flex-column h-100 justify-content-between">
+                      <div>
+                        <h6 class="fw-bold text-dark mb-1">📋 Acta de Reunión</h6>
+                        <small class="text-muted d-block mb-3">Google Docs de seguimiento.</small>
+                      </div>
+                      <div class="d-flex gap-2">
+                        <a id="btnDocActa" href="#" target="_blank" class="btn btn-outline-primary btn-sm flex-grow-1">Abrir Doc</a>
+                        <a id="btnFolderActa" href="#" target="_blank" class="btn btn-outline-secondary btn-sm">📁 Carpeta</a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- EVALUACIONES -->
+              <div id="cardEvaluations" class="card p-4 d-none">
+                <div class="d-flex align-items-center justify-content-between border-bottom pb-2 mb-3">
+                  <h4 class="fw-bold text-dark mb-0">💬 Evaluaciones de la Reunión</h4>
+                  <span id="evalCounter" class="badge bg-primary fs-6">0 reportes</span>
+                </div>
+                <div id="evaluationsContainer" class="row g-3"></div>
+              </div>
+            </div>
+
+            <!-- ENCARGADOS Y METADATA -->
+            <div class="col-lg-4">
+              <div class="card p-4 mb-4">
+                <h5 class="fw-bold text-dark border-bottom pb-2 mb-3">Encargados (Rovers)</h5>
+                <ul id="listEncargados" class="list-group list-group-flush text-start"></ul>
+              </div>
+              <div class="card p-4">
+                <h5 class="fw-bold text-dark border-bottom pb-2 mb-3">Estructura Scout</h5>
+                <div class="mb-3">
+                  <span class="text-muted d-block small fw-semibold mb-1">Pilares:</span>
+                  <div id="badgesPilares"></div>
+                </div>
+                <div>
+                  <span class="text-muted d-block small fw-semibold mb-1">Áreas de Crecimiento:</span>
+                  <div id="badgesRutas"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MODAL EDITAR (Se poblará dinámicamente) -->
+        <div class="modal fade" id="modalEdit" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+              <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title fw-bold">✏️ Editar Reunión</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+              </div>
+              <form id="formEditMeeting" onsubmit="saveMeeting(event)">
+                <div class="modal-body p-4" id="modalEditBody"></div>
+                <div class="modal-footer bg-light">
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                  <button type="submit" class="btn btn-primary" id="btnSubmitEdit">Guardar Cambios</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>`;
+
+      loadMeetingDetails(id);
+    }
+
+    async function loadMeetingDetails(id) {
+      try {
+        const res = await callBaaS("getMeetingDetails", { id: id });
+        meetingDetails = res.data;
+
+        document.getElementById("headerMeetingName").textContent = meetingDetails.nombre;
+        document.getElementById("txtNumeroUnico").textContent = "# " + meetingDetails.numeroUnico;
+        document.getElementById("txtTipo").textContent = meetingDetails.tipo;
+        
+        const fStart = new Date(meetingDetails.fecha + "T00:00:00");
+        document.getElementById("txtFecha").textContent = fStart.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        
+        if (meetingDetails.tipo === "campamento" && meetingDetails.fechaFin) {
+          const fEnd = new Date(meetingDetails.fechaFin + "T00:00:00");
+          document.getElementById("txtFechaFin").textContent = fEnd.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+          document.getElementById("txtFechaFinGroup").style.display = "block";
+        } else {
+          document.getElementById("txtFechaFinGroup").style.display = "none";
+        }
+
+        document.getElementById("txtLugar").textContent = meetingDetails.lugar;
+        document.getElementById("txtObjetivo").textContent = meetingDetails.objetivo || "Sin objetivo registrado.";
+        document.getElementById("txtObservacion").textContent = meetingDetails.observacion || "Sin observaciones.";
+
+        // Encargados
+        const listEnc = document.getElementById("listEncargados");
+        listEnc.innerHTML = meetingDetails.encargadosDetalle.map(enc => `
+          <li class="list-group-item d-flex align-items-center gap-2 px-0">
+            <span>⚜️</span> <strong class="text-dark">${enc}</strong>
+          </li>
+        `).join("");
+
+        // Badges
+        document.getElementById("badgesPilares").innerHTML = meetingDetails.pilares.length > 0
+          ? meetingDetails.pilares.map(p => `<span class="badge bg-primary me-1 px-2 py-1 mb-1">${p}</span>`).join("")
+          : `<span class="text-muted small">Ninguno registrado</span>`;
+
+        document.getElementById("badgesRutas").innerHTML = meetingDetails.rutas.length > 0
+          ? meetingDetails.rutas.map(r => `<span class="badge bg-info text-dark me-1 px-2 py-1 mb-1">${r}</span>`).join("")
+          : `<span class="text-muted small">Ninguna registrada</span>`;
+
+        // Botones condicionales
+        if (meetingDetails.canEdit) document.getElementById("btnEditMeeting").classList.remove("d-none");
+        if (meetingDetails.canDelete) document.getElementById("btnDeleteMeeting").classList.remove("d-none");
+
+        if (meetingDetails.canAccessDocs) {
+          document.getElementById("btnDocFormato").href = meetingDetails.documentoFormatoUrl;
+          document.getElementById("btnFolderFormato").href = meetingDetails.carpetaFormatosUrl;
+          document.getElementById("btnDocActa").href = meetingDetails.documentoActaUrl;
+          document.getElementById("btnFolderActa").href = meetingDetails.carpetaActasUrl;
+          
+          document.getElementById("cardDocuments").classList.remove("d-none");
+          document.getElementById("cardEvaluations").classList.remove("d-none");
+          loadEvaluations(id);
+        }
+
+        document.getElementById("loader").classList.add("d-none");
+        document.getElementById("meetingContent").classList.remove("d-none");
+      } catch (err) {
+        document.getElementById("loader").innerHTML = `
+          <div class="alert alert-danger">
+            <h4 class="fw-bold">Error</h4>
+            <p>${err.message}</p>
+            <a class="btn btn-outline-danger mt-2" href="#program">Volver al Calendario</a>
+          </div>`;
+      }
+    }
+
+    async function loadEvaluations(reunionId) {
+      const container = document.getElementById("evaluationsContainer");
+      const counter = document.getElementById("evalCounter");
+      container.innerHTML = `<div class="col-12 text-center text-muted">Cargando evaluaciones...</div>`;
+
+      try {
+        const res = await callBaaS("getMeetingEvaluations", { reunionId: reunionId });
+        counter.textContent = res.data.length + (res.data.length === 1 ? " reporte" : " reportes");
+
+        if (res.data.length === 0) {
+          container.innerHTML = `<div class="col-12 text-center py-4 text-muted border rounded bg-white">Ningún reporte registrado aún.</div>`;
+          return;
+        }
+
+        container.innerHTML = res.data.map(ev => `
+          <div class="col-md-6">
+            <div class="card p-3 evaluation-card shadow-sm h-100">
+              <h6 class="fw-bold text-dark border-bottom pb-1 mb-2">👤 ${ev.nombreAsistente}</h6>
+              <div class="row g-2 text-start">
+                <div class="col-12">
+                  <strong class="text-muted small d-block">Antes:</strong>
+                  <p class="mb-2 text-muted small" style="white-space: pre-wrap;">${ev.antes}</p>
+                </div>
+                <div class="col-12">
+                  <strong class="text-muted small d-block">Durante:</strong>
+                  <p class="mb-2 text-muted small" style="white-space: pre-wrap;">${ev.durante}</p>
+                </div>
+                <div class="col-12">
+                  <strong class="text-muted small d-block">Después:</strong>
+                  <p class="mb-0 text-muted small" style="white-space: pre-wrap;">${ev.despues}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        `).join("");
+      } catch (err) {
+        container.innerHTML = `<div class="col-12 text-center text-danger">Error: ${err.message}</div>`;
+      }
+    }
+
+    async function deleteMeeting() {
+      if (confirm("¿Seguro que deseas eliminar esta reunión?")) {
+        try {
+          await callBaaS("deleteMeeting", { id: meetingDetails.id });
+          alert("Reunión eliminada.");
+          window.location.hash = "#program";
+        } catch (err) {
+          alert("Error: " + err.message);
+        }
+      }
+    }
+
+    // Modal de edición simplificado
+    let editModal = null;
+    let localRovers = [];
+    let localPilares = [];
+    let localRutas = [];
+
+    async function openEditModal() {
+      const container = document.getElementById("modalEditBody");
+      container.innerHTML = `<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>`;
+      editModal = new bootstrap.Modal(document.getElementById("modalEdit"));
+      editModal.show();
+
+      try {
+        const resRovers = await callBaaS("getRovers");
+        const resPilares = await callBaaS("getPilares");
+        const resRutas = await callBaaS("getRutasYCompetencias");
+
+        localRovers = resRovers.data;
+        localPilares = resPilares.data;
+        localRutas = resRutas.rutas;
+
+        const isRover = !meetingDetails.fullControl;
+
+        container.innerHTML = `
+          <div class="alert alert-warning ${isRover ? "" : "d-none"}" style="font-size: 0.85rem;">
+            ⚠️ <strong>Encargado:</strong> Solo puedes editar título, objetivo, observaciones y áreas. Fecha, tipo y encargados están bloqueados.
+          </div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label fw-bold">Fecha</label>
+              <input type="date" class="form-control" id="editFecha" value="${meetingDetails.fecha}" ${isRover ? "disabled" : ""}>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-bold">Nombre</label>
+              <input type="text" class="form-control" id="editNombre" value="${meetingDetails.nombre}" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-bold">Tipo</label>
+              <select class="form-select" id="editTipo" onchange="toggleLugarInEdit()" ${isRover ? "disabled" : ""}>
+                <option value="reunión" ${meetingDetails.tipo === "reunión" ? "selected" : ""}>Reunión Ordinaria</option>
+                <option value="salida" ${meetingDetails.tipo === "salida" ? "selected" : ""}>Salida</option>
+                <option value="campamento" ${meetingDetails.tipo === "campamento" ? "selected" : ""}>Campamento</option>
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-bold">Lugar</label>
+              <input type="text" class="form-control" id="editLugar" value="${meetingDetails.lugar}" ${isRover ? "disabled" : ""}>
+            </div>
+          </div>
+          
+          <div class="mt-4 ${isRover ? "d-none" : ""}">
+            <label class="form-label fw-bold border-bottom d-block pb-1">Encargados (Rovers)</label>
+            <div class="row g-2 p-2 bg-light rounded" style="max-height: 120px; overflow-y: auto;">
+              ${localRovers.map((r, idx) => `
+                <div class="col-6">
+                  <div class="form-check">
+                    <input class="form-check-input edit-rover-check" type="checkbox" value="${r.correo}" id="editRover_${idx}" ${meetingDetails.encargados.includes(r.correo) ? "checked" : ""}>
+                    <label class="form-check-label small" for="editRover_${idx}">${r.apodo}</label>
+                  </div>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+
+          <div class="row g-3 mt-3">
+            <div class="col-md-6">
+              <label class="form-label fw-bold d-block border-bottom pb-1">Pilares</label>
+              <div class="p-2 border rounded" style="max-height: 120px; overflow-y: auto;">
+                ${localPilares.map((p, idx) => `
+                  <div class="form-check">
+                    <input class="form-check-input edit-pilar-check" type="checkbox" value="${p}" id="editPilar_${idx}" ${meetingDetails.pilares.includes(p) ? "checked" : ""}>
+                    <label class="form-check-label small" for="editPilar_${idx}">${p}</label>
+                  </div>
+                `).join("")}
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-bold d-block border-bottom pb-1">Áreas</label>
+              <div class="p-2 border rounded" style="max-height: 120px; overflow-y: auto;">
+                ${localRutas.map((r, idx) => `
+                  <div class="form-check">
+                    <input class="form-check-input edit-ruta-check" type="checkbox" value="${r.nombre}" id="editRuta_${idx}" ${meetingDetails.rutas.includes(r.nombre) ? "checked" : ""}>
+                    <label class="form-check-label small" for="editRuta_${idx}">${r.nombre}</label>
+                  </div>
+                `).join("")}
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-4">
+            <label class="form-label fw-bold">Objetivo</label>
+            <textarea class="form-control" id="editObjetivo" rows="2">${meetingDetails.objetivo}</textarea>
+          </div>
+          <div class="mt-3">
+            <label class="form-label fw-bold">Observaciones</label>
+            <textarea class="form-control" id="editObservacion" rows="2">${meetingDetails.observacion}</textarea>
+          </div>`;
+
+      } catch (err) {
+        container.innerHTML = `<div class="alert alert-danger">Error BaaS: ${err.message}</div>`;
+      }
+    }
+
+    function toggleLugarInEdit() {
+      const tipo = document.getElementById("editTipo").value;
+      const lugar = document.getElementById("editLugar");
+      if (tipo === "reunión") {
+        lugar.value = "I.E. Santa Rosa de Lima";
+        lugar.disabled = true;
+      } else {
+        lugar.disabled = false;
+      }
+    }
+
+    async function saveMeeting(e) {
+      e.preventDefault();
+      const btn = document.getElementById("btnSubmitEdit");
+      btn.disabled = true;
+      btn.textContent = "Guardando...";
+
+      const pilares = Array.from(document.querySelectorAll(".edit-pilar-check:checked")).map(cb => cb.value);
+      const rutas = Array.from(document.querySelectorAll(".edit-ruta-check:checked")).map(cb => cb.value);
+      
+      let encargados = [];
+      if (meetingDetails.fullControl) {
+        encargados = Array.from(document.querySelectorAll(".edit-rover-check:checked")).map(cb => cb.value);
+      } else {
+        encargados = meetingDetails.encargados;
+      }
+
+      const input = {
+        nombre: document.getElementById("editNombre").value.trim(),
+        objetivo: document.getElementById("editObjetivo").value,
+        observacion: document.getElementById("editObservacion").value,
+        pilares: pilares,
+        rutas: rutas,
+        encargados: encargados,
+        fecha: document.getElementById("editFecha").value,
+        tipo: document.getElementById("editTipo").value,
+        lugar: document.getElementById("editLugar").value
+      };
+
+      try {
+        await callBaaS("updateMeeting", { id: meetingDetails.id, reunionInput: input });
+        editModal.hide();
+        loadMeetingDetails(meetingDetails.id);
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "Guardar Cambios";
+        alert("Fallo al guardar: " + err.message);
+      }
+    }
+
+    // =========================================================================
+    // VISTA: CREAR REUNIÓN
+    // =========================================================================
+    function renderCreateMeeting() {
+      document.getElementById("app").innerHTML = `
+        <div class="row justify-content-center">
+          <div class="col-lg-8">
+            <div class="card p-4">
+              <div class="d-flex align-items-center gap-3 border-bottom pb-3 mb-4">
+                <a class="btn btn-outline-secondary btn-sm" href="#program">⬅️ Volver</a>
+                <h2 class="fw-bold mb-0">📅 Registrar Nueva Reunión</h2>
+              </div>
+
+              <div id="alertBox" class="alert d-none" role="alert"></div>
+
+              <form id="formMeeting" onsubmit="createMeeting(event)">
+                <h5 class="fw-bold text-dark border-bottom pb-2 mb-3">Información General</h5>
+                <div class="row g-3 mb-4">
+                  <div class="col-md-6">
+                    <label class="form-label fw-semibold">Fecha de Inicio <span class="text-danger">*</span></label>
+                    <input type="date" class="form-control" id="inputFecha" required onchange="onStartDateChange()">
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label fw-semibold">Nombre de la Reunión <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="inputNombre" required placeholder="Ej. El Titán y su Canoa de Plata">
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label fw-semibold">Tipo de Actividad <span class="text-danger">*</span></label>
+                    <select class="form-select" id="selectTipo" required onchange="toggleActivityType()">
+                      <option value="reunión" selected>Reunión Ordinaria</option>
+                      <option value="salida">Salida</option>
+                      <option value="campamento">Campamento</option>
+                    </select>
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label fw-semibold">Lugar <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control bg-light" id="inputLugar" value="I.E. Santa Rosa de Lima" readonly required>
+                  </div>
+                  <div class="col-md-6" id="fechaFinGroup" style="display: none;">
+                    <label class="form-label fw-semibold">Fecha de Fin <span class="text-danger">*</span></label>
+                    <input type="date" class="form-control" id="inputFechaFin">
+                  </div>
+                </div>
+
+                <h5 class="fw-bold text-dark border-bottom pb-2 mb-3">Encargados (Rovers) <span class="text-danger">*</span></h5>
+                <div class="mb-4">
+                  <div id="roversContainer" class="row g-2 border rounded p-3 bg-light" style="max-height: 150px; overflow-y: auto;">
+                    <div class="text-muted small text-center">Conectando...</div>
+                  </div>
+                </div>
+
+                <h5 class="fw-bold text-dark border-bottom pb-2 mb-3">Planificación Didáctica</h5>
+                <div class="mb-3">
+                  <label class="form-label fw-semibold">Objetivo</label>
+                  <textarea class="form-control" id="inputObjetivo" rows="2" placeholder="Objetivo de la sesión..."></textarea>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label fw-semibold">Observación</label>
+                  <textarea class="form-control" id="inputObservacion" rows="2" placeholder="Recomendaciones..."></textarea>
+                </div>
+
+                <div class="row g-3 mb-4">
+                  <div class="col-md-6">
+                    <label class="form-label fw-semibold d-block border-bottom pb-1">Pilares</label>
+                    <div id="pilaresContainer" class="p-2 border rounded bg-white" style="max-height: 120px; overflow-y: auto;"></div>
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label fw-semibold d-block border-bottom pb-1">Áreas (Rutas)</label>
+                    <div id="rutasContainer" class="p-2 border rounded bg-white" style="max-height: 120px; overflow-y: auto;"></div>
+                  </div>
+                </div>
+
+                <div class="text-end border-top pt-3">
+                  <a class="btn btn-secondary me-2" href="#program">Cancelar</a>
+                  <button type="submit" class="btn btn-success" id="btnSubmit">✨ Crear y Clonar Docs</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>`;
+
+      loadCreationLists();
+    }
+
+    async function loadCreationLists() {
+      try {
+        const resRovers = await callBaaS("getRovers");
+        const resPilares = await callBaaS("getPilares");
+        const resRutas = await callBaaS("getRutasYCompetencias");
+
+        // Pintar Rovers
+        const rovC = document.getElementById("roversContainer");
+        if (resRovers.data.length === 0) {
+          rovC.innerHTML = `<div class="col-12 text-center text-danger small">No hay Rovers registrados.</div>`;
+        } else {
+          rovC.innerHTML = resRovers.data.map((r, idx) => `
+            <div class="col-sm-6">
+              <div class="form-check">
+                <input class="form-check-input rover-check" type="checkbox" value="${r.correo}" id="chkRov_${idx}">
+                <label class="form-check-label text-dark small" for="chkRov_${idx}"><strong>${r.apodo}</strong> (${r.nombreCompleto})</label>
+              </div>
+            </div>
+          `).join("");
+        }
+
+        // Pilares
+        document.getElementById("pilaresContainer").innerHTML = resPilares.data.map((p, idx) => `
+          <div class="form-check">
+            <input class="form-check-input pilar-check" type="checkbox" value="${p}" id="chkPil_${idx}">
+            <label class="form-check-label small" for="chkPil_${idx}">${p}</label>
+          </div>
+        `).join("");
+
+        // Rutas
+        document.getElementById("rutasContainer").innerHTML = resRutas.rutas.map((r, idx) => `
+          <div class="form-check">
+            <input class="form-check-input ruta-check" type="checkbox" value="${r.nombre}" id="chkRut_${idx}">
+            <label class="form-check-label small" for="chkRut_${idx}">${r.nombre}</label>
+          </div>
+        `).join("");
+
+      } catch (err) {
+        alert("BaaS Error: " + err.message);
+      }
+    }
+
+    function toggleActivityType() {
+      const tipo = document.getElementById("selectTipo").value;
+      const lugar = document.getElementById("inputLugar");
+      const fGroup = document.getElementById("fechaFinGroup");
+      if (tipo === "reunión") {
+        lugar.value = "I.E. Santa Rosa de Lima";
+        lugar.readOnly = true;
+        lugar.classList.add("bg-light");
+        fGroup.style.display = "none";
+      } else {
+        lugar.value = "";
+        lugar.placeholder = "Indica el lugar...";
+        lugar.readOnly = false;
+        lugar.classList.remove("bg-light");
+        fGroup.style.display = tipo === "campamento" ? "block" : "none";
+      }
+    }
+
+    function onStartDateChange() {
+      const start = document.getElementById("inputFecha").value;
+      const end = document.getElementById("inputFechaFin");
+      if (start) {
+        end.min = start;
+        if (!end.value || end.value < start) end.value = start;
+      }
+    }
+
+    async function createMeeting(e) {
+      e.preventDefault();
+      const encargados = Array.from(document.querySelectorAll(".rover-check:checked")).map(cb => cb.value);
+      if (encargados.length === 0) {
+        alert("Selecciona al menos un Rover encargado.");
+        return;
+      }
+
+      const pilares = Array.from(document.querySelectorAll(".pilar-check:checked")).map(cb => cb.value);
+      const rutas = Array.from(document.querySelectorAll(".ruta-check:checked")).map(cb => cb.value);
+      
+      const btn = document.getElementById("btnSubmit");
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span> Creando Docs en Drive...`;
+
+      const input = {
+        fecha: document.getElementById("inputFecha").value,
+        nombre: document.getElementById("inputNombre").value.trim(),
+        tipo: document.getElementById("selectTipo").value,
+        lugar: document.getElementById("inputLugar").value.trim(),
+        fechaFin: document.getElementById("inputFechaFin").value || null,
+        objetivo: document.getElementById("inputObjetivo").value,
+        observacion: document.getElementById("inputObservacion").value,
+        pilares: pilares,
+        rutas: rutas,
+        encargados: encargados
+      };
+
+      try {
+        const res = await callBaaS("createMeeting", { reunionInput: input });
+        document.getElementById("alertBox").className = "alert alert-success";
+        document.getElementById("alertBox").textContent = res.message;
+        document.getElementById("alertBox").classList.remove("d-none");
+        setTimeout(() => { window.location.hash = `#meeting/${res.id}`; }, 1500);
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "✨ Crear y Clonar Docs";
+        document.getElementById("alertBox").className = "alert alert-danger";
+        document.getElementById("alertBox").textContent = err.message;
+        document.getElementById("alertBox").classList.remove("d-none");
+      }
+    }
+
+    // =========================================================================
+    // VISTA: FORMULARIO DE ASISTENCIA SECUENCIAL (Wizard 3 Pasos)
+    // =========================================================================
+    let activeMeetings = [];
+    let usersPlain = [];
+    let wizardRutas = [];
+    let wizardCompetencias = [];
+
+    function renderAsistencia() {
+      document.getElementById("app").innerHTML = `
+        <div class="row justify-content-center">
+          <div class="col-lg-8">
+            <div class="card p-4">
+              
+              <div class="row text-center mb-5 border-bottom pb-4" id="wizardHeader">
+                <div class="col-4">
+                  <div class="step-indicator active" id="ind_1">1</div>
+                  <span class="fw-semibold small text-primary" id="title_1">Asistencia</span>
+                </div>
+                <div class="col-4">
+                  <div class="step-indicator" id="ind_2">2</div>
+                  <span class="fw-semibold small text-muted" id="title_2">Evaluación</span>
+                </div>
+                <div class="col-4">
+                  <div class="step-indicator" id="ind_3">3</div>
+                  <span class="fw-semibold small text-muted" id="title_3">Adelanto</span>
+                </div>
+              </div>
+
+              <div id="wizardAlert" class="alert alert-danger d-none" role="alert"></div>
+
+              <form id="attendanceWizard" onsubmit="saveAttendance(event)">
+                <!-- PASO 1 -->
+                <div class="wizard-step active" id="step_1">
+                  <h4 class="fw-bold mb-4 text-dark">📍 Paso 1: Registro de Asistencia</h4>
+                  <div class="mb-3">
+                    <label class="form-label fw-bold">¿Quién asistió? <span class="text-danger">*</span></label>
+                    <select class="form-select form-select-lg" id="selectUsuario" required></select>
+                  </div>
+                  <div class="mb-5">
+                    <label class="form-label fw-bold">¿A qué reunión asistió? <span class="text-danger">*</span></label>
+                    <select class="form-select form-select-lg" id="selectReunion" required onchange="onWizardMeetingSelected()"></select>
+                  </div>
+                  <div class="text-end border-top pt-3">
+                    <button type="button" class="btn btn-primary px-4 btn-lg" onclick="goToStep(2)">Siguiente ➡️</button>
+                  </div>
+                </div>
+
+                <!-- PASO 2 -->
+                <div class="wizard-step" id="step_2">
+                  <div class="p-3 mb-4 rounded border-start border-4 border-info bg-light">
+                    <p class="mb-1 text-muted small fw-semibold">Reunión Seleccionada:</p>
+                    <h5 class="fw-bold text-dark mb-1" id="bannerMeetingName">--</h5>
+                    <p class="text-muted small mb-0" id="bannerMeetingObjective">--</p>
+                  </div>
+                  <h4 class="fw-bold mb-3 text-dark">💬 Paso 2: Evaluación de la Actividad</h4>
+                  <p class="text-muted small mb-4">Califica cualitativamente la sesión (Llenar al menos uno).</p>
+                  
+                  <div class="mb-3">
+                    <label class="form-label fw-bold">Antes de la Reunión</label>
+                    <textarea class="form-control" id="areaAntes" rows="2" placeholder="Preparativos..."></textarea>
+                  </div>
+                  <div class="mb-3">
+                    <label class="form-label fw-bold">Durante la Reunión</label>
+                    <textarea class="form-control" id="areaDurante" rows="2" placeholder="Desarrollo..."></textarea>
+                  </div>
+                  <div class="mb-4">
+                    <label class="form-label fw-bold">Después de la Reunión</label>
+                    <textarea class="form-control" id="areaDespues" rows="2" placeholder="Limpieza, acuerdos..."></textarea>
+                  </div>
+
+                  <div class="text-end border-top pt-3 d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-secondary px-4 btn-lg" onclick="goToStep(1)">⬅️ Atrás</button>
+                    <button type="button" class="btn btn-primary px-4 btn-lg" onclick="goToStep(3)">Siguiente ➡️</button>
+                  </div>
+                </div>
+
+                <!-- PASO 3 -->
+                <div class="wizard-step" id="step_3">
+                  <h4 class="fw-bold mb-4 text-dark">⚜️ Paso 3: Plan de Adelanto</h4>
+                  <div class="mb-3">
+                    <label class="form-label fw-bold">¿Qué Hiciste Hoy? <span class="text-danger">*</span></label>
+                    <textarea class="form-control" id="inputHiciste" rows="2" required></textarea>
+                  </div>
+                  <div class="mb-3">
+                    <label class="form-label fw-bold">¿Qué Aprendiste Hoy? <span class="text-danger">*</span></label>
+                    <textarea class="form-control" id="inputAprendiste" rows="2" required></textarea>
+                  </div>
+
+                  <div class="row g-3 mb-4">
+                    <div class="col-md-6">
+                      <label class="form-label fw-bold d-block border-bottom pb-1">Rutas Trabajadas <span class="text-danger">*</span></label>
+                      <div id="wizardRutasC" class="p-2 border rounded" style="max-height: 150px; overflow-y: auto;"></div>
+                    </div>
+                    <div class="col-md-6">
+                      <label class="form-label fw-bold d-block border-bottom pb-1">Competencias Trabajadas <span class="text-danger">*</span></label>
+                      <p class="text-muted small" id="noRutasWizardMsg">Selecciona una ruta para habilitarlas.</p>
+                      <div id="wizardCompsC" class="p-2 border rounded d-none" style="max-height: 150px; overflow-y: auto;"></div>
+                    </div>
+                  </div>
+
+                  <!-- Escalas Lineales de nivel -->
+                  <div id="sectionNiveles" class="mb-4 d-none">
+                    <h6 class="fw-bold border-bottom pb-1 mb-3">Nivel Alcanzado por Competencia</h6>
+                    <div id="wizardNivelesC" class="d-flex flex-column gap-3"></div>
+                  </div>
+
+                  <div class="mb-4">
+                    <label class="form-label fw-bold">¿Qué Hiciste que Demuestra ese Nivel? <span class="text-danger">*</span></label>
+                    <textarea class="form-control" id="inputDemostracion" rows="2" required></textarea>
+                  </div>
+
+                  <!-- Autoevaluacion 1-5 -->
+                  <div class="mb-4 linear-scale-box text-center p-3">
+                    <label class="form-label fw-bold d-block mb-3 fs-5">Autoevaluación de Desempeño General</label>
+                    <div class="d-flex justify-content-center gap-3 align-items-center flex-wrap">
+                      <span class="text-muted small">Malo 🙁</span>
+                      <div class="btn-group" role="group">
+                        ${[1,2,3,4,5].map(v => `
+                          <input type="radio" class="btn-check" name="radioAuto" id="auto_${v}" value="${v}" ${v === 3 ? "checked" : ""}>
+                          <label class="btn btn-outline-primary px-3 fw-bold" for="auto_${v}">${v}</label>
+                        `).join("")}
+                      </div>
+                      <span class="text-success small">Excelente 🏆</span>
+                    </div>
+                  </div>
+
+                  <div class="text-end border-top pt-3 d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-secondary px-4 btn-lg" onclick="goToStep(2)">⬅️ Atrás</button>
+                    <button type="submit" class="btn btn-success px-4 btn-lg" id="btnSubmitWizard">💾 Guardar Registro</button>
+                  </div>
+                </div>
+              </form>
+
+              <!-- ÉXITO -->
+              <div id="successWizard" class="text-center py-5 d-none">
+                <span class="fs-1 text-success"><i class="bi bi-check-circle-fill"></i></span>
+                <h2 class="fw-bold mt-3">¡Asistencia Guardada!</h2>
+                <p class="text-muted mb-4">Tus datos relacionales del Plan de Adelanto han sido almacenados de forma exitosa.</p>
+                <div class="d-flex justify-content-center gap-3 flex-wrap">
+                  <button class="btn btn-primary btn-lg" onclick="window.location.reload()">Registar otra</button>
+                  <a class="btn btn-outline-secondary btn-lg" href="#program">Volver al Calendario</a>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>`;
+
+      loadWizardData();
+    }
+
+    async function loadWizardData() {
+      try {
+        const meetings = await callBaaS("getActiveMeetings");
+        const users = await callBaaS("getAllUsersPlain");
+        const configs = await callBaaS("getRutasYCompetencias");
+
+        activeMeetings = meetings.data;
+        usersPlain = users.data;
+        wizardRutas = configs.rutas;
+        wizardCompetencias = configs.competencias;
+
+        // Poblar integrantes
+        const selU = document.getElementById("selectUsuario");
+        selU.innerHTML = `<option value="" disabled>Selecciona al integrante...</option>` +
+          usersPlain.map(u => `<option value="${u.correo}" ${u.correo === AppState.sessionEmail ? "selected" : ""}>${u.nombreCompleto} (${u.apodo})</option>`).join("");
+
+        // Poblar reuniones
+        const selM = document.getElementById("selectReunion");
+        if (activeMeetings.length === 0) {
+          selM.innerHTML = `<option value="" disabled selected>No hay reuniones pasadas disponibles.</option>`;
+        } else {
+          selM.innerHTML = `<option value="" disabled selected>Selecciona la sesión...</option>` +
+            activeMeetings.map(m => `<option value="${m.id}">[#${m.id}] ${m.fechaFormatted} - ${m.nombre}</option>`).join("");
+        }
+
+        // Checkboxes Rutas
+        document.getElementById("wizardRutasC").innerHTML = wizardRutas.map((r, idx) => `
+          <div class="form-check">
+            <input class="form-check-input wizard-ruta-check" type="checkbox" value="${r.nombre}" id="wRut_${idx}" onchange="onWizardRutasToggled()">
+            <label class="form-check-label small" for="wRut_${idx}"><strong>${r.nombre}</strong></label>
+          </div>
+        `).join("");
+
+      } catch (err) {
+        alert("BaaS Error: " + err.message);
+      }
+    }
+
+    function onWizardMeetingSelected() {
+      const id = document.getElementById("selectReunion").value;
+      const m = activeMeetings.find(meet => meet.id == id);
+      if (m) {
+        document.getElementById("bannerMeetingName").textContent = m.nombre;
+        document.getElementById("bannerMeetingObjective").textContent = m.objetivo;
+      }
+    }
+
+    function onWizardRutasToggled() {
+      const checkedRutas = Array.from(document.querySelectorAll(".wizard-ruta-check:checked")).map(cb => cb.value);
+      const msg = document.getElementById("noRutasWizardMsg");
+      const compC = document.getElementById("wizardCompsC");
+
+      if (checkedRutas.length === 0) {
+        msg.classList.remove("d-none");
+        compC.classList.add("d-none");
+        compC.innerHTML = "";
+        onWizardCompsToggled();
+        return;
+      }
+
+      msg.classList.add("d-none");
+      compC.classList.remove("d-none");
+
+      const filtered = wizardCompetencias.filter(c => checkedRutas.includes(c.ruta));
+      compC.innerHTML = filtered.map((c, idx) => `
+        <div class="form-check mb-1">
+          <input class="form-check-input wizard-comp-check" type="checkbox" value="${c.nombre}" id="wComp_${idx}" onchange="onWizardCompsToggled()">
+          <label class="form-check-label small" for="wComp_${idx}"><strong>${c.nombre}</strong> <span class="badge bg-secondary" style="font-size:0.6rem;">${c.ruta}</span></label>
+        </div>
+      `).join("");
+    }
+
+    function onWizardCompsToggled() {
+      const checkedComps = Array.from(document.querySelectorAll(".wizard-comp-check:checked")).map(cb => cb.value);
+      const section = document.getElementById("sectionNiveles");
+      const container = document.getElementById("wizardNivelesC");
+
+      if (checkedComps.length === 0) {
+        section.classList.add("d-none");
+        container.innerHTML = "";
+        return;
+      }
+
+      section.classList.remove("d-none");
+      container.innerHTML = checkedComps.map((cName, idx) => `
+        <div class="linear-scale-box text-center p-3 border rounded">
+          <label class="form-label fw-bold d-block small mb-2">Nivel en: <span class="text-primary">${cName}</span></label>
+          <div class="d-flex justify-content-center gap-2 align-items-center flex-wrap">
+            <span class="text-muted small">Nivel 1</span>
+            <div class="btn-group" role="group">
+              ${[1,2,3,4,5].map(v => `
+                <input type="radio" class="btn-check wizard-level-radio" name="wLvl_${idx}" id="wLvl_${idx}_${v}" value="${v}" data-comp="${cName}" ${v === 3 ? "checked" : ""}>
+                <label class="btn btn-outline-success px-3 fw-bold btn-sm" for="wLvl_${idx}_${v}">${v}</label>
+              `).join("")}
+            </div>
+            <span class="text-muted small">Nivel 5</span>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    let wizardCurrentStep = 1;
+
+    function goToStep(step) {
+      document.getElementById("wizardAlert").classList.add("d-none");
+      
+      if (wizardCurrentStep === 1 && step === 2) {
+        const u = document.getElementById("selectUsuario").value;
+        const r = document.getElementById("selectReunion").value;
+        if (!u || !r) {
+          showWizardError("Selecciona el Integrante y la Reunión.");
+          return;
+        }
+      }
+
+      if (wizardCurrentStep === 2 && step === 3) {
+        const antes = document.getElementById("areaAntes").value.trim();
+        const durante = document.getElementById("areaDurante").value.trim();
+        const despues = document.getElementById("areaDespues").value.trim();
+        if (!antes && !durante && !despues) {
+          showWizardError("La sección de Evaluación requiere completar al menos uno de los tres campos.");
+          return;
+        }
+      }
+
+      document.getElementById("step_" + wizardCurrentStep).classList.remove("active");
+      document.getElementById("step_" + step).classList.add("active");
+
+      document.getElementById("ind_" + wizardCurrentStep).classList.remove("active");
+      document.getElementById("title_" + wizardCurrentStep).classList.remove("active");
+      if (step > wizardCurrentStep) {
+        document.getElementById("ind_" + wizardCurrentStep).classList.add("completed");
+      }
+
+      document.getElementById("ind_" + step).classList.add("active");
+      document.getElementById("title_" + step).classList.add("active");
+
+      wizardCurrentStep = step;
+      window.scrollTo(0, 0);
+    }
+
+    function showWizardError(msg) {
+      const err = document.getElementById("wizardAlert");
+      err.textContent = msg;
+      err.classList.remove("d-none");
+      window.scrollTo(0, 0);
+    }
+
+    async function saveAttendance(e) {
+      e.preventDefault();
+      document.getElementById("wizardAlert").classList.add("d-none");
+
+      const hiciste = document.getElementById("inputHiciste").value.trim();
+      const aprendiste = document.getElementById("inputAprendiste").value.trim();
+      const demostracion = document.getElementById("inputDemostracion").value.trim();
+      
+      const rutas = Array.from(document.querySelectorAll(".wizard-ruta-check:checked")).map(cb => cb.value);
+      const competencias = Array.from(document.querySelectorAll(".wizard-comp-check:checked")).map(cb => cb.value);
+      const autoevaluacion = document.querySelector("input[name='radioAuto']:checked").value;
+
+      if (!hiciste || !aprendiste || !demostracion || rutas.length === 0 || competencias.length === 0) {
+        showWizardError("Rellena todos los campos obligatorios (*).");
+        return;
+      }
+
+      const nivelesCompetencias = {};
+      document.querySelectorAll(".wizard-level-radio:checked").forEach(radio => {
+        const cName = radio.getAttribute("data-comp");
+        nivelesCompetencias[cName] = parseInt(radio.value, 10);
+      });
+
+      const btn = document.getElementById("btnSubmitWizard");
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span> Registrando...`;
+
+      const input = {
+        correoUsuario: document.getElementById("selectUsuario").value,
+        reunionId: parseInt(document.getElementById("selectReunion").value, 10),
+        antes: document.getElementById("areaAntes").value,
+        durante: document.getElementById("areaDurante").value,
+        despues: document.getElementById("areaDespues").value,
+        queHicisteHoy: hiciste,
+        queAprendisteHoy: aprendiste,
+        rutasTrabajadas: rutas,
+        competenciasTrabajadas: competencias,
+        nivelesCompetencias: nivelesCompetencias,
+        demostracionNivel: demostracion,
+        autoevaluacion: parseInt(autoevaluacion, 10)
+      };
+
+      try {
+        await callBaaS("submitAttendance", { attendanceInput: input });
+        document.getElementById("attendanceWizard").classList.add("d-none");
+        document.getElementById("wizardHeader").classList.add("d-none");
+        document.getElementById("successWizard").classList.remove("d-none");
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "💾 Guardar Registro";
+        showWizardError("Fallo al registrar: " + err.message);
+      }
+    }
+
+    // =========================================================================
+    // VISTA: GESTIÓN DE INTEGRANTES (Usuarios)
+    // =========================================================================
+    let usersList = [];
+    let userModal = null;
+
+    function renderManageUsers() {
+      document.getElementById("app").innerHTML = `
+        <div class="row mb-4 align-items-center justify-content-between">
+          <div class="col-md-6">
+            <h2 class="fw-bold">👥 Gestión de Usuarios</h2>
+            <p class="text-muted">Administración y asignación de roles mediante llamadas BaaS.</p>
+          </div>
+          <div class="col-md-6 text-md-end">
+            <button class="btn btn-primary d-inline-flex align-items-center gap-2" onclick="openCreateUserModal()">
+              <span>➕</span> Registrar Integrante
+            </button>
+          </div>
+        </div>
+
+        <div id="usersAlert" class="alert d-none" role="alert"></div>
+
+        <div class="card">
+          <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 text-start">
+              <thead class="table-light">
+                <tr>
+                  <th scope="col" style="width: 70px;">Avatar</th>
+                  <th scope="col">Nombre Completo</th>
+                  <th scope="col">Correo Electrónico</th>
+                  <th scope="col">Roles</th>
+                  <th scope="col" class="text-end" style="width: 200px;">Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="usersTableBody">
+                <tr>
+                  <td colspan="5" class="text-center py-4 text-muted">
+                    <div class="spinner-border text-primary spinner-border-sm me-2"></div>
+                    Cargando integrantes...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- MODAL INTEGRANTE -->
+        <div class="modal fade" id="modalUser" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+              <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title fw-bold" id="modalUserLabel">👤 Registrar Integrante</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+              </div>
+              <form id="formUser" onsubmit="saveUser(event)">
+                <div class="modal-body p-4">
+                  <div id="modalUserAlert" class="alert alert-danger d-none"></div>
+
+                  <div class="mb-3">
+                    <label class="form-label fw-semibold">Correo Electrónico <span class="text-danger">*</span></label>
+                    <input type="email" class="form-control" id="modalEmail" required placeholder="correo@gmail.com">
+                  </div>
+                  <div class="mb-3">
+                    <label class="form-label fw-semibold">Nombre Completo <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="modalNombre" required>
+                  </div>
+                  <div class="mb-2">
+                    <label class="form-label fw-semibold">Asignar Roles <span class="text-danger">*</span></label>
+                    <div class="form-check mb-2">
+                      <input class="form-check-input role-check" type="checkbox" value="rover" id="roleRover">
+                      <label class="form-check-label small" for="roleRover">⚜️ Rover</label>
+                    </div>
+                    <div class="form-check mb-2">
+                      <input class="form-check-input role-check" type="checkbox" value="jefe" id="roleJefe">
+                      <label class="form-check-label small" for="roleJefe">🛡️ Jefe</label>
+                    </div>
+                    <div class="form-check mb-2">
+                      <input class="form-check-input role-check" type="checkbox" value="director" id="roleDirector">
+                      <label class="form-check-label small" for="roleDirector">🧭 Director de Programa</label>
+                    </div>
+                  </div>
+                </div>
+                <div class="modal-footer bg-light">
+                  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                  <button type="submit" class="btn btn-primary" id="btnSubmitUser">Guardar Integrante</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>`;
+
+      userModal = new bootstrap.Modal(document.getElementById("modalUser"));
+      loadUsers();
+    }
+
+    async function loadUsers() {
+      const tbody = document.getElementById("usersTableBody");
+      try {
+        const res = await callBaaS("getUsers");
+        usersList = res.data;
+        tbody.innerHTML = "";
+
+        if (usersList.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-muted">No hay integrantes registrados.</td></tr>`;
+          return;
+        }
+
+        usersList.forEach(u => {
+          const tr = document.createElement("tr");
+          const avatar = u.fotoPerfil || "https://via.placeholder.com/45?text=" + encodeURIComponent(u.apodo);
+          const roles = u.roles.map(r => {
+            let cl = "bg-secondary";
+            if (r === "rover") cl = "bg-info text-dark";
+            if (r === "jefe") cl = "bg-primary";
+            if (r === "director") cl = "bg-success";
+            return `<span class="badge ${cl} me-1 text-uppercase">${r}</span>`;
+          }).join("");
+
+          tr.innerHTML = `
+            <td><img src="${avatar}" class="avatar-cell shadow-sm border" alt="Avatar"></td>
+            <td><strong class="text-dark">${u.nombreCompleto}</strong></td>
+            <td class="text-secondary">${u.correo}</td>
+            <td>${roles}</td>
+            <td class="text-end">
+              <div class="d-flex gap-2 justify-content-end">
+                <button class="btn btn-outline-dark btn-sm" onclick="openEditUserModal('${u.correo}')">Editar</button>
+                <a class="btn btn-outline-primary btn-sm" href="#profile/${encodeURIComponent(u.correo)}">Perfil</a>
+                <button class="btn btn-outline-danger btn-sm" onclick="deleteUser('${u.correo}')">Eliminar</button>
+              </div>
+            </td>`;
+          tbody.appendChild(tr);
+        });
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-danger">Error: ${err.message}</td></tr>`;
+      }
+    }
+
+    function openCreateUserModal() {
+      isEditing = false;
+      document.getElementById("modalUserLabel").textContent = "👤 Registrar Integrante";
+      document.getElementById("modalEmail").value = "";
+      document.getElementById("modalEmail").readOnly = false;
+      document.getElementById("modalNombre").value = "";
+      document.getElementById("modalUserAlert").classList.add("d-none");
+      document.querySelectorAll(".role-check").forEach(cb => cb.checked = false);
+      userModal.show();
+    }
+
+    function openEditUserModal(email) {
+      const u = usersList.find(user => user.correo === email);
+      if (!u) return;
+
+      isEditing = true;
+      document.getElementById("modalUserLabel").textContent = "👤 Editar Integrante";
+      document.getElementById("modalEmail").value = u.correo;
+      document.getElementById("modalEmail").readOnly = true;
+      document.getElementById("modalNombre").value = u.nombreCompleto;
+      document.getElementById("modalUserAlert").classList.add("d-none");
+      
+      document.querySelectorAll(".role-check").forEach(cb => {
+        cb.checked = u.roles.includes(cb.value);
+      });
+      userModal.show();
+    }
+
+    async function saveUser(e) {
+      e.preventDefault();
+      const email = document.getElementById("modalEmail").value.trim().toLowerCase();
+      const nombre = document.getElementById("modalNombre").value.trim();
+      const roles = Array.from(document.querySelectorAll(".role-check:checked")).map(cb => cb.value);
+
+      if (roles.length === 0) {
+        const alert = document.getElementById("modalUserAlert");
+        alert.textContent = "Error: Debes asignar al menos un rol.";
+        alert.classList.remove("d-none");
+        return;
+      }
+
+      const btn = document.getElementById("btnSubmitUser");
+      btn.disabled = true;
+      btn.textContent = "Guardando...";
+
+      try {
+        const res = await callBaaS("saveUserRoles", {
+          email: email,
+          profileInput: { nombreCompleto: nombre, roles: roles }
+        });
+        userModal.hide();
+        loadUsers();
+        alert(res.message);
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "Guardar Integrante";
+        const alert = document.getElementById("modalUserAlert");
+        alert.textContent = "Error: " + err.message;
+        alert.classList.remove("d-none");
+      }
+    }
+
+    async function deleteUser(email) {
+      if (confirm(`¿Seguro que deseas eliminar permanentemente a ${email}?`)) {
+        try {
+          const res = await callBaaS("deleteUser", { email: email });
+          alert(res.message);
+          loadUsers();
+        } catch (err) {
+          alert("Fallo al eliminar: " + err.message);
+        }
+      }
+    }
+
+    // =========================================================================
+    // VISTA: PERFIL E HISTORIAL (Plan de Adelanto Condicional)
+    // =========================================================================
+    let localProfileUser = null;
+
+    function renderProfile(email) {
+      document.getElementById("app").innerHTML = `
+        <div id="profileLoader" class="text-center py-5">
+          <div class="spinner-border text-primary"></div>
+          <p class="mt-2 text-muted">Cargando perfil...</p>
+        </div>
+
+        <div id="profileContent" class="row g-4 d-none">
+          <div class="col-lg-4">
+            <div class="card p-4 text-center">
+              <h4 class="fw-bold mb-3">Foto de Perfil</h4>
+              <div class="mb-3">
+                <img id="profileAvatar" src="https://via.placeholder.com/120?text=Avatar" class="profile-avatar-img shadow-sm border" alt="Avatar">
+              </div>
+              <div class="mb-3">
+                <input class="form-control form-control-sm" type="file" id="filePhoto" accept="image/*">
+              </div>
+              <button id="btnUploadPhoto" class="btn btn-outline-primary btn-sm w-100 mb-3" onclick="uploadProfilePhoto()">Subir Foto</button>
+
+              <hr>
+
+              <h5 class="fw-semibold mt-2">Icono Predefinido</h5>
+              <div class="d-flex justify-content-center gap-3 flex-wrap mb-2">
+                <span class="fs-2 icon-option" data-icon="shield" onclick="selectIcon('shield')">🛡️</span>
+                <span class="fs-2 icon-option" data-icon="campfire" onclick="selectIcon('campfire')">🔥</span>
+                <span class="fs-2 icon-option" data-icon="compass" onclick="selectIcon('campfire')">🧭</span>
+                <span class="fs-2 icon-option" data-icon="map" onclick="selectIcon('map')">🗺️</span>
+                <span class="fs-2 icon-option" data-icon="star" onclick="selectIcon('star')">⭐</span>
+                <span class="fs-2 icon-option" data-icon="user" onclick="selectIcon('user')">👤</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-lg-8">
+            <div class="card p-4 mb-4">
+              <h3 class="fw-bold text-dark mb-4">Datos del Perfil</h3>
+              <div id="profileAlert" class="alert d-none"></div>
+
+              <form onsubmit="saveProfileDetails(event)">
+                <div class="row g-3 text-start">
+                  <div class="col-md-6">
+                    <label class="form-label fw-bold">Correo Electrónico</label>
+                    <input type="email" class="form-control bg-light" id="profEmail" readonly>
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label fw-bold">Nombre Completo <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="profNombre" required>
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label fw-bold">Apodo / Nombre Scout</label>
+                    <input type="text" class="form-control" id="profApodo">
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label fw-bold">Fecha de Cumpleaños</label>
+                    <input type="date" class="form-control" id="profNacimiento">
+                  </div>
+                  <div class="col-12 text-end mt-4">
+                    <button type="submit" class="btn btn-primary px-4" id="btnSaveProfile">Guardar Perfil</button>
+                  </div>
+                </div>
+              </form>
+            </div>
+
+            <!-- PLAN DE ADELANTO EDITABLE (Solo Jefes sobre Rovers) -->
+            <div id="sectionPlanAdelanto" class="card p-4 mb-4 d-none">
+              <h3 class="fw-bold text-dark mb-3">⚜️ Plan de Adelanto (Solo Jefes)</h3>
+              <div id="planAlert" class="alert d-none"></div>
+              <form id="formPlanAdelanto" onsubmit="savePlanAdelanto(event)">
+                <h5 class="fw-bold border-bottom pb-2 mb-3 text-start">Fechas Importantes</h5>
+                <div class="row g-3 mb-4 text-start">
+                  <div class="col-md-4"><label class="form-label small fw-bold">Ingreso al Clan</label><input type="date" class="form-control" id="inputIngreso"></div>
+                  <div class="col-md-4"><label class="form-label small fw-bold">Salida del Clan</label><input type="date" class="form-control" id="inputSalida"></div>
+                  <div class="col-md-4"><label class="form-label small fw-bold">Obtención RS</label><input type="date" class="form-control" id="inputObtencionRS"></div>
+                  <div class="col-md-4"><label class="form-label small fw-bold">Obtención RL</label><input type="date" class="form-control" id="inputObtencionRL"></div>
+                  <div class="col-md-4"><label class="form-label small fw-bold">Obtención BP</label><input type="date" class="form-control" id="inputObtencionBP"></div>
+                </div>
+
+                <h5 class="fw-bold border-bottom pb-2 mb-3 text-start">Rutas Formativas</h5>
+                <div id="rutasPlanContainer" class="row g-3 mb-4 text-start"></div>
+
+                <h5 class="fw-bold border-bottom pb-2 mb-3 text-start">Nivel de Competencias</h5>
+                <div id="competenciasPlanContainer" class="row g-3 mb-4 text-start"></div>
+
+                <div class="text-end border-top pt-3">
+                  <button type="submit" class="btn btn-success px-4" id="btnSavePlan">Actualizar Plan de Adelanto</button>
+                </div>
+              </form>
+            </div>
+
+            <!-- HISTORIAL DE ASISTENCIAS -->
+            <div class="card p-4">
+              <h3 class="fw-bold text-dark mb-3 text-start">📊 Historial de Asistencias</h3>
+              <p class="text-muted small text-start">Haz clic en cualquier fila para ver el Plan de Adelanto reportado.</p>
+              <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0 text-start" style="font-size: 0.9rem;">
+                  <thead class="table-light">
+                    <tr>
+                      <th scope="col">Fecha</th>
+                      <th scope="col">Reunión</th>
+                      <th scope="col">Tipo</th>
+                      <th scope="col">Rutas</th>
+                      <th scope="col">Competencias</th>
+                      <th scope="col" class="text-center">Autoevaluación</th>
+                    </tr>
+                  </thead>
+                  <tbody id="assistTableBody">
+                    <tr><td colspan="6" class="text-center py-3 text-muted">Cargando historial...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MODAL DETALLE ASISTENCIA (Solo sección Plan de Adelanto) -->
+        <div class="modal fade" id="modalAssistance" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+              <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title fw-bold">⚜️ Plan de Adelanto Reportado</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+              </div>
+              <div class="modal-body p-4" id="modalAssistBody"></div>
+            </div>
+          </div>
+        </div>`;
+
+      loadProfile(email);
+    }
+
+    let profileSelectedIcon = "user";
+    let profileRutasMaster = [];
+    let profileCompsMaster = [];
+
+    async function loadProfile(email) {
+      try {
+        const configs = await callBaaS("getRutasYCompetencias");
+        profileRutasMaster = configs.rutas;
+        profileCompsMaster = configs.competencias;
+
+        const res = await callBaaS("getUserData", { email: email });
+        localProfileUser = res.data;
+
+        document.getElementById("profEmail").value = localProfileUser.correo;
+        document.getElementById("profNombre").value = localProfileUser.nombreCompleto;
+        document.getElementById("profApodo").value = localProfileUser.apodo;
+        document.getElementById("profNacimiento").value = localProfileUser.fechaNacimiento;
+
+        // Avatar
+        const avatar = localProfileUser.fotoPerfil || "https://via.placeholder.com/120?text=" + encodeURIComponent(localProfileUser.apodo);
+        document.getElementById("profileAvatar").src = avatar;
+        selectIcon(localProfileUser.icono || "user");
+
+        // Plan de Adelanto condicional
+        if (localProfileUser.esRover && localProfileUser.tieneAccesoAdelanto) {
+          renderPlanAdelantoForm(localProfileUser);
+          document.getElementById("sectionPlanAdelanto").classList.remove("d-none");
+        }
+
+        // Cargar tabla histórica de asistencias
+        loadHistoricalAssistances(email);
+
+        document.getElementById("profileLoader").classList.add("d-none");
+        document.getElementById("profileContent").classList.remove("d-none");
+
+      } catch (err) {
+        document.getElementById("profileLoader").innerHTML = `<div class="alert alert-danger">Fallo al conectar con BaaS: ${err.message}</div>`;
+      }
+    }
+
+    function selectIcon(iconName) {
+      profileSelectedIcon = iconName;
+      document.querySelectorAll(".icon-option").forEach(el => {
+        el.classList.remove("selected");
+        if (el.getAttribute("data-icon") === iconName) el.classList.add("selected");
+      });
+    }
+
+    async function saveProfileDetails(e) {
+      e.preventDefault();
+      const btn = document.getElementById("btnSaveProfile");
+      btn.disabled = true;
+      btn.textContent = "Guardando...";
+
+      const input = {
+        correo: localProfileUser.correo,
+        nombreCompleto: document.getElementById("profNombre").value.trim(),
+        apodo: document.getElementById("profApodo").value.trim(),
+        fechaNacimiento: document.getElementById("profNacimiento").value,
+        icono: profileSelectedIcon
+      };
+
+      try {
+        const res = await callBaaS("saveProfile", { profileInput: input });
+        showSectionAlert("profileAlert", res.message, "success");
+        btn.disabled = false;
+        btn.textContent = "Guardar Perfil";
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "Guardar Perfil";
+        showSectionAlert("profileAlert", err.message, "danger");
+      }
+    }
+
+    async function uploadProfilePhoto() {
+      const input = document.getElementById("filePhoto");
+      if (input.files.length === 0) {
+        alert("Selecciona un archivo primero.");
+        return;
+      }
+
+      const btn = document.getElementById("btnUploadPhoto");
+      btn.disabled = true;
+      btn.textContent = "Subiendo...";
+
+      const file = input.files[0];
+      const reader = new FileReader();
+      reader.onload = async function(e) {
+        try {
+          const res = await callBaaS("uploadProfilePhoto", {
+            base64Data: e.target.result,
+            fileName: file.name,
+            targetEmail: localProfileUser.correo
+          });
+          document.getElementById("profileAvatar").src = res.fotoPerfil;
+          input.value = "";
+          alert("¡Foto de perfil actualizada!");
+        } catch (err) {
+          alert("Error: " + err.message);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Subir Foto";
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function renderPlanAdelantoForm(data) {
+      document.getElementById("inputIngreso").value = data.fechaIngreso;
+      document.getElementById("inputSalida").value = data.fechaSalida;
+      document.getElementById("inputObtencionRS").value = data.fechaObtencionRS;
+      document.getElementById("inputObtencionRL").value = data.fechaObtencionRL;
+      document.getElementById("inputObtencionBP").value = data.fechaObtencionBP;
+
+      // Rutas
+      const rutasC = document.getElementById("rutasPlanContainer");
+      rutasC.innerHTML = profileRutasMaster.map((r, idx) => {
+        const isGanada = data.rutasGanadas[r.nombre] ? data.rutasGanadas[r.nombre].ganada : false;
+        const fEntrega = data.rutasGanadas[r.nombre] ? data.rutasGanadas[r.nombre].fechaEntrega || "" : "";
+        return `
+          <div class="col-md-6 border rounded p-3 bg-light bg-opacity-50 mb-2">
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input profile-ruta-switch" type="checkbox" id="pRut_${idx}" data-ruta="${r.nombre}" ${isGanada ? "checked" : ""} onchange="toggleProfileRutaDate(${idx})">
+              <label class="form-check-label fw-bold text-dark" for="pRut_${idx}">${r.nombre}</label>
+            </div>
+            <div class="row g-2 align-items-center ${isGanada ? "" : "d-none"}" id="pRutDateGroup_${idx}">
+              <div class="col-auto"><small class="fw-semibold">Fecha:</small></div>
+              <div class="col"><input type="date" class="form-control form-control-sm profile-ruta-date" id="pRutDate_${idx}" value="${fEntrega}"></div>
+            </div>
+          </div>`;
+      }).join("");
+
+      // Competencias
+      const compsC = document.getElementById("competenciasPlanContainer");
+      compsC.innerHTML = profileCompsMaster.map((c, idx) => {
+        const currentLvl = data.competenciasNivel[c.nombre] || 1;
+        return `
+          <div class="col-md-6 border-bottom py-2">
+            <div class="row align-items-center">
+              <div class="col">
+                <strong class="text-dark small d-block">${c.nombre}</strong>
+                <span class="badge bg-secondary" style="font-size:0.6rem;">${c.ruta}</span>
+              </div>
+              <div class="col-auto">
+                <select class="form-select form-select-sm profile-comp-select" data-comp="${c.nombre}" style="width: 100px;">
+                  ${[1,2,3,4,5].map(v => `<option value="${v}" ${currentLvl === v ? "selected" : ""}>Nivel ${v}</option>`).join("")}
+                </select>
+              </div>
+            </div>
+          </div>`;
+      }).join("");
+    }
+
+    function toggleProfileRutaDate(idx) {
+      const sw = document.getElementById("pRut_" + idx);
+      const grp = document.getElementById("pRutDateGroup_" + idx);
+      if (sw.checked) grp.classList.remove("d-none");
+      else { grp.classList.add("d-none"); document.getElementById("pRutDate_" + idx).value = ""; }
+    }
+
+    async function savePlanAdelanto(e) {
+      e.preventDefault();
+      const btn = document.getElementById("btnSavePlan");
+      btn.disabled = true;
+      btn.textContent = "Guardando...";
+
+      const rutasGanadas = {};
+      document.querySelectorAll(".profile-ruta-switch").forEach((sw, idx) => {
+        const rName = sw.getAttribute("data-ruta");
+        const fEntrega = document.getElementById("pRutDate_" + idx).value;
+        rutasGanadas[rName] = { ganada: sw.checked, fechaEntrega: fEntrega || null };
+      });
+
+      const competenciasNivel = {};
+      document.querySelectorAll(".profile-comp-select").forEach(sel => {
+        const cName = sel.getAttribute("data-comp");
+        competenciasNivel[cName] = parseInt(sel.value, 10);
+      });
+
+      const input = {
+        fechaIngreso: document.getElementById("inputIngreso").value,
+        fechaSalida: document.getElementById("inputSalida").value,
+        fechaObtencionRS: document.getElementById("inputObtencionRS").value,
+        fechaObtencionRL: document.getElementById("inputObtencionRL").value,
+        fechaObtencionBP: document.getElementById("inputObtencionBP").value,
+        rutasGanadas: rutasGanadas,
+        competenciasNivel: competenciasNivel
+      };
+
+      try {
+        const res = await callBaaS("savePlanAdelanto", { targetEmail: localProfileUser.correo, planData: input });
+        showSectionAlert("planAlert", res.message, "success");
+        btn.disabled = false;
+        btn.textContent = "Actualizar Plan de Adelanto";
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "Actualizar Plan de Adelanto";
+        showSectionAlert("planAlert", err.message, "danger");
+      }
+    }
+
+    let localRoverAssistancesList = [];
+
+    async function loadHistoricalAssistances(email) {
+      const tbody = document.getElementById("assistTableBody");
+      try {
+        const res = await callBaaS("getRoverAssistances", { email: email });
+        localRoverAssistancesList = res.data;
+        tbody.innerHTML = "";
+
+        if (res.data.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="6" class="text-center py-3 text-muted">No se registran asistencias para este usuario.</td></tr>`;
+          return;
+        }
+
+        res.data.forEach(ast => {
+          const tr = document.createElement("tr");
+          tr.style.cursor = "pointer";
+          tr.onclick = () => openAssistanceModal(ast.id);
+          tr.innerHTML = `
+            <td>${ast.fecha}</td>
+            <td><strong class="text-primary">${ast.reunionNombre}</strong></td>
+            <td><span class="badge bg-secondary" style="font-size:0.75rem;">${ast.tipo.toUpperCase()}</span></td>
+            <td>${ast.rutasTrabajadas}</td>
+            <td class="text-truncate" style="max-width: 200px;">${ast.competenciasTrabajadas}</td>
+            <td class="text-center fw-bold text-success">${ast.autoevaluacion} / 5</td>`;
+          tbody.appendChild(tr);
+        });
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-3 text-danger">Error: ${err.message}</td></tr>`;
+      }
+    }
+
+    function openAssistanceModal(astId) {
+      const ast = localRoverAssistancesList.find(a => a.id === astId);
+      if (!ast) return;
+
+      const body = document.getElementById("modalAssistBody");
+      body.innerHTML = `
+        <div class="row g-3">
+          <div class="col-12 border-bottom pb-2 text-start">
+            <p class="mb-1 text-muted small">Reunión:</p>
+            <h5 class="fw-bold text-primary mb-0">${ast.reunionNombre}</h5>
+            <small class="text-muted d-block mt-1">Fecha: ${ast.fecha} (${ast.tipo.toUpperCase()})</small>
+          </div>
+          
+          <div class="col-md-6 text-start">
+            <h6 class="fw-bold text-dark">¿Qué hiciste hoy?</h6>
+            <div class="p-3 bg-light rounded text-muted" style="white-space: pre-wrap; font-size:0.9rem;">${ast.detallesAdelanto.queHicisteHoy}</div>
+          </div>
+          <div class="col-md-6 text-start">
+            <h6 class="fw-bold text-dark">¿Qué aprendiste hoy?</h6>
+            <div class="p-3 bg-light rounded text-muted" style="white-space: pre-wrap; font-size:0.9rem;">${ast.detallesAdelanto.queAprendisteHoy}</div>
+          </div>
+
+          <div class="col-12 mt-4 text-start">
+            <h6 class="fw-bold text-dark border-bottom pb-2">Rutas y Competencias Trabajadas</h6>
+            <div class="mb-3">
+              <strong class="text-muted small">Rutas:</strong>
+              <div class="mt-1">
+                ${ast.detallesAdelanto.rutas.map(r => `<span class="badge bg-info text-dark me-1 py-1 px-2">${r}</span>`).join("")}
+              </div>
+            </div>
+            <div class="mb-3">
+              <strong class="text-muted small">Competencias reportadas:</strong>
+              <div class="row g-2 mt-1">
+                ${ast.detallesAdelanto.competencias.map(c => `
+                  <div class="col-sm-6">
+                    <div class="border rounded p-2 bg-light d-flex justify-content-between align-items-center">
+                      <span class="small fw-semibold text-dark text-truncate" style="max-width:70%;">${c}</span>
+                      <span class="badge bg-success">Nivel ${ast.detallesAdelanto.niveles[c] || 1}</span>
+                    </div>
+                  </div>
+                `).join("")}
+              </div>
+            </div>
+          </div>
+
+          <div class="col-12 mt-3 text-start">
+            <h6 class="fw-bold text-dark">¿Qué hiciste que demuestra ese nivel?</h6>
+            <div class="p-3 bg-light rounded text-muted" style="white-space: pre-wrap; font-size:0.9rem;">${ast.detallesAdelanto.demostracionNivel}</div>
+          </div>
+
+          <div class="col-md-6 mt-3">
+            <div class="card p-3 bg-light text-center border-0">
+              <h6 class="fw-bold mb-1 text-dark">Autoevaluación General</h6>
+              <div class="fs-2 fw-bold text-primary">${ast.detallesAdelanto.autoevaluacion} / 5</div>
+            </div>
+          </div>
+        </div>`;
+
+      const modal = new bootstrap.Modal(document.getElementById("modalAssistance"));
+      modal.show();
+    }
+
+    // =========================================================================
+    // VISTA: CONFIGURACIONES GENERALES (Y GESTIÓN DE PROGRAMAS)
+    // =========================================================================
+    function renderManageConfig() {
+      document.getElementById("app").innerHTML = `
+        <div class="row mb-4">
+          <div class="col-12 text-start">
+            <h2 class="fw-bold">⚙️ Panel de Configuraciones (BaaS)</h2>
+            <p class="text-muted">Administración global de carpetas de Drive, programas anuales y catálogos scouts.</p>
+          </div>
+        </div>
+
+        <ul class="nav nav-tabs mb-4" id="configTabs">
+          <li class="nav-item"><button class="nav-link active fw-bold" id="tab_templates" data-bs-toggle="tab" data-bs-target="#panel_templates">📁 Plantillas de Docs</button></li>
+          <li class="nav-item"><button class="nav-link fw-bold" id="tab_programs" data-bs-toggle="tab" data-bs-target="#panel_programs" onclick="loadConfigPrograms()">📅 Programas Anuales</button></li>
+          <li class="nav-item"><button class="nav-link fw-bold" id="tab_rutas" data-bs-toggle="tab" data-bs-target="#panel_rutas" onclick="loadConfigRutas()">🗺️ Rutas</button></li>
+          <li class="nav-item"><button class="nav-link fw-bold" id="tab_competencias" data-bs-toggle="tab" data-bs-target="#panel_competencias" onclick="loadConfigComps()">⚜️ Competencias</button></li>
+          <li class="nav-item"><button class="nav-link fw-bold" id="tab_pilares" data-bs-toggle="tab" data-bs-target="#panel_pilares" onclick="loadConfigPilares()">🔥 Pilares</button></li>
+        </ul>
+
+        <div class="tab-content">
+          <!-- PLANTILLAS -->
+          <div class="tab-pane fade show active" id="panel_templates">
+            <div class="card p-4">
+              <h4 class="fw-bold mb-3 text-start">Enlaces a Plantillas de Docs</h4>
+              <div id="templatesAlert" class="alert d-none"></div>
+              <form id="formTemplates" onsubmit="saveTemplates(event)">
+                <div class="mb-3 text-start">
+                  <label class="form-label fw-bold">URL Plantilla de Formato de Programa (Google Docs)</label>
+                  <input type="url" class="form-control" id="tmplFormato" required placeholder="https://docs.google.com/document/d/.../edit">
+                </div>
+                <div class="mb-4 text-start">
+                  <label class="form-label fw-bold">URL Plantilla de Acta de Reunión (Google Docs)</label>
+                  <input type="url" class="form-control" id="tmplActa" required placeholder="https://docs.google.com/document/d/.../edit">
+                </div>
+                <div class="text-end"><button type="submit" class="btn btn-primary px-4" id="btnSaveTmpls">Guardar Enlaces</button></div>
+              </form>
+            </div>
+          </div>
+
+          <!-- PROGRAMAS ANUALES -->
+          <div class="tab-pane fade" id="panel_programs">
+            <div class="card p-4">
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4 class="fw-bold mb-0">Listado de Programas Anuales</h4>
+                <button class="btn btn-success btn-sm" onclick="openCreateProgramModal()">📅 Abrir Programa</button>
+              </div>
+              <div id="progsAlert" class="alert d-none"></div>
+              <div class="table-responsive">
+                <table class="table table-hover align-middle text-start" style="font-size:0.95rem;">
+                  <thead class="table-light">
+                    <tr>
+                      <th>Año</th>
+                      <th>Fecha Inicio</th>
+                      <th>Formatos (Drive)</th>
+                      <th>Actas (Drive)</th>
+                      <th class="text-end">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tblConfigPrograms"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- RUTAS -->
+          <div class="tab-pane fade" id="panel_rutas">
+            <div class="card p-4">
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4 class="fw-bold mb-0">Listado de Rutas (Áreas)</h4>
+                <button class="btn btn-success btn-sm" onclick="openCreateRutaModal()">➕ Agregar Ruta</button>
+              </div>
+              <div id="rutasAlert" class="alert d-none"></div>
+              <div class="table-responsive">
+                <table class="table table-hover align-middle text-start" style="font-size:0.95rem;">
+                  <thead class="table-light"><tr><th>Nombre de la Ruta</th><th>Descripción</th><th class="text-end">Acciones</th></tr></thead>
+                  <tbody id="tblConfigRutas"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- COMPETENCIAS -->
+          <div class="tab-pane fade" id="panel_competencias">
+            <div class="card p-4">
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4 class="fw-bold mb-0">Listado de Competencias</h4>
+                <button class="btn btn-success btn-sm" onclick="openCreateCompModal()">➕ Agregar Competencia</button>
+              </div>
+              <div id="compsAlert" class="alert d-none"></div>
+              <div class="table-responsive">
+                <table class="table table-hover align-middle text-start" style="font-size:0.95rem;">
+                  <thead class="table-light"><tr><th>Competencia</th><th>Ruta Asociada</th><th>Características</th><th class="text-end">Acciones</th></tr></thead>
+                  <tbody id="tblConfigComps"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- PILARES -->
+          <div class="tab-pane fade" id="panel_pilares">
+            <div class="card p-4">
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4 class="fw-bold mb-0">Listado de Pilares Scout</h4>
+                <button class="btn btn-success btn-sm" onclick="openCreatePilarModal()">➕ Agregar Pilar</button>
+              </div>
+              <div id="pilaresAlert" class="alert d-none"></div>
+              <div class="table-responsive">
+                <table class="table table-hover align-middle text-start" style="font-size:0.95rem;">
+                  <thead class="table-light"><tr><th>Pilar</th><th class="text-end">Acciones</th></tr></thead>
+                  <tbody id="tblConfigPilares"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MODAL PROGRAMA -->
+        <div class="modal fade" id="modalProg" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content text-start border-0 shadow">
+              <div class="modal-header bg-dark text-white"><h5 class="modal-title fw-bold">📅 Abrir Programa Anual</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+              <form id="formProg" onsubmit="saveProgram(event)">
+                <div class="modal-body p-4">
+                  <div class="row g-3">
+                    <div class="col-md-6"><label class="form-label fw-semibold">Año</label><input type="number" class="form-control" id="pAnio" required></div>
+                    <div class="col-md-6"><label class="form-label fw-semibold">Fecha Inicio</label><input type="date" class="form-control" id="pFechaIn" required></div>
+                    <div class="col-12"><label class="form-label fw-semibold">Carpeta de Formatos (URL)</label><input type="url" class="form-control" id="pFormUrl" required></div>
+                    <div class="col-12"><label class="form-label fw-semibold">Carpeta de Actas (URL)</label><input type="url" class="form-control" id="pActaUrl" required></div>
+                  </div>
+                </div>
+                <div class="modal-footer bg-light"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button><button type="submit" class="btn btn-success">Guardar Programa</button></div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- MODAL RUTA -->
+        <div class="modal fade" id="modalRut" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content text-start">
+              <div class="modal-header bg-dark text-white"><h5 class="modal-title fw-bold">🗺️ Ruta</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+              <form id="formRut" onsubmit="saveRuta(event)">
+                <div class="modal-body p-4">
+                  <div class="mb-3"><label class="form-label fw-semibold">Nombre</label><input type="text" class="form-control" id="rNombre" required></div>
+                  <div class="mb-3"><label class="form-label fw-semibold">Descripción</label><textarea class="form-control" id="rDesc" rows="2"></textarea></div>
+                </div>
+                <div class="modal-footer bg-light"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar Ruta</button></div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- MODAL COMPETENCIA -->
+        <div class="modal fade" id="modalCmp" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content text-start">
+              <div class="modal-header bg-dark text-white"><h5 class="modal-title fw-bold">⚜️ Competencia</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+              <form id="formCmp" onsubmit="saveCompetencia(event)">
+                <div class="modal-body p-4">
+                  <div class="mb-3"><label class="form-label fw-semibold">Nombre</label><input type="text" class="form-control" id="cNombre" required></div>
+                  <div class="mb-3"><label class="form-label fw-semibold">Ruta Asociada</label><select class="form-select" id="cRuta" required></select></div>
+                  <div class="mb-3"><label class="form-label fw-semibold">Descripción</label><textarea class="form-control" id="cDesc" rows="2"></textarea></div>
+                  <div class="mb-3"><label class="form-label fw-semibold">Características (Lista por líneas)</label><textarea class="form-control" id="cCarac" rows="3"></textarea></div>
+                </div>
+                <div class="modal-footer bg-light"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar Competencia</button></div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- MODAL PILAR -->
+        <div class="modal fade" id="modalPil" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content text-start">
+              <div class="modal-header bg-dark text-white"><h5 class="modal-title fw-bold">🔥 Pilar</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+              <form id="formPil" onsubmit="savePilar(event)">
+                <div class="modal-body p-4">
+                  <div class="mb-3"><label class="form-label fw-semibold">Nombre</label><input type="text" class="form-control" id="pNombre" required></div>
+                </div>
+                <div class="modal-footer bg-light"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button><button type="submit" class="btn btn-primary">Guardar Pilar</button></div>
+              </form>
+            </div>
+          </div>
+        </div>`;
+
+      // Cargar plantillas de Docs
+      loadTemplatesConfig();
+    }
+
+    async function loadTemplatesConfig() {
+      try {
+        const res = await callBaaS("getSystemConfigs");
+        document.getElementById("tmplFormato").value = res.data.templateFormatoUrl;
+        document.getElementById("tmplActa").value = res.data.templateActaUrl;
+      } catch (err) {
+        showSectionAlert("templatesAlert", "Error: " + err.message, "danger");
+      }
+    }
+
+    async function saveTemplates(e) {
+      e.preventDefault();
+      const btn = document.getElementById("btnSaveTmpls");
+      btn.disabled = true;
+      btn.textContent = "Guardando...";
+
+      const configs = {
+        templateFormatoUrl: document.getElementById("tmplFormato").value,
+        templateActaUrl: document.getElementById("tmplActa").value
+      };
+
+      try {
+        const res = await callBaaS("saveSystemConfigs", { configs: configs });
+        showSectionAlert("templatesAlert", res.message, "success");
+      } catch (err) {
+        showSectionAlert("templatesAlert", err.message, "danger");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Guardar Enlaces";
+      }
+    }
+
+    // Programas
+    let modProg = null;
+    let localProgs = [];
+
+    async function loadConfigPrograms() {
+      const tbody = document.getElementById("tblConfigPrograms");
+      tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted">Cargando...</td></tr>`;
+      modProg = new bootstrap.Modal(document.getElementById("modalProg"));
+
+      try {
+        const res = await callBaaS("getPrograms");
+        localProgs = res.data;
+        tbody.innerHTML = res.data.map(p => `
+          <tr>
+            <td><span class="badge bg-dark">${p.anio}</span></td>
+            <td><strong>${p.fechaInicio}</strong></td>
+            <td><a href="${p.carpetaFormatosUrl}" target="_blank" class="text-truncate d-inline-block small" style="max-width:200px;">${p.carpetaFormatosUrl}</a></td>
+            <td><a href="${p.carpetaActasUrl}" target="_blank" class="text-truncate d-inline-block small" style="max-width:200px;">${p.carpetaActasUrl}</a></td>
+            <td class="text-end"><button class="btn btn-outline-dark btn-sm" onclick="openEditProgramModal(${p.anio})">Editar</button></td>
+          </tr>
+        `).join("");
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">Error: ${err.message}</td></tr>`;
+      }
+    }
+
+    function openCreateProgramModal() {
+      isProgramEditing = false;
+      document.getElementById("pAnio").value = new Date().getFullYear();
+      document.getElementById("pAnio").readOnly = false;
+      document.getElementById("pFechaIn").value = "";
+      document.getElementById("pFormUrl").value = "";
+      document.getElementById("pActaUrl").value = "";
+      modProg.show();
+    }
+
+    function openEditProgramModal(year) {
+      const p = localProgs.find(prog => prog.anio === year);
+      if (!p) return;
+      isProgramEditing = true;
+      document.getElementById("pAnio").value = p.anio;
+      document.getElementById("pAnio").readOnly = true;
+      document.getElementById("pFechaIn").value = p.fechaInicio;
+      document.getElementById("pFormUrl").value = p.carpetaFormatosUrl;
+      document.getElementById("pActaUrl").value = p.carpetaActasUrl;
+      modProg.show();
+    }
+
+    async function saveProgram(e) {
+      e.preventDefault();
+      const input = {
+        anio: document.getElementById("pAnio").value,
+        fechaInicio: document.getElementById("pFechaIn").value,
+        carpetaFormatosUrl: document.getElementById("pFormUrl").value,
+        carpetaActasUrl: document.getElementById("pActaUrl").value
+      };
+
+      try {
+        const res = await callBaaS("saveProgram", { programInput: input });
+        modProg.hide();
+        loadConfigPrograms();
+        showSectionAlert("progsAlert", res.message, "success");
+      } catch (err) {
+        alert("Error: " + err.message);
+      }
+    }
+
+    // Rutas
+    let modRut = null;
+    let localRutasConfig = [];
+
+    async function loadConfigRutas() {
+      const tbody = document.getElementById("tblConfigRutas");
+      tbody.innerHTML = `<tr><td colspan="3" class="text-center text-muted">Cargando...</td></tr>`;
+      modRut = new bootstrap.Modal(document.getElementById("modalRut"));
+
+      try {
+        const res = await callBaaS("getRutasYCompetencias");
+        localRutasConfig = res.rutas;
+        tbody.innerHTML = res.rutas.map(r => `
+          <tr>
+            <td><strong>${r.nombre}</strong></td>
+            <td class="text-muted small">${r.descripcion}</td>
+            <td class="text-end">
+              <div class="d-flex gap-2 justify-content-end">
+                <button class="btn btn-outline-dark btn-sm" onclick="openEditRutaModal('${r.nombre}')">Editar</button>
+                <button class="btn btn-outline-danger btn-sm" onclick="deleteRuta('${r.nombre}')">Eliminar</button>
+              </div>
+            </td>
+          </tr>
+        `).join("");
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="3" class="text-center text-danger">Error: ${err.message}</td></tr>`;
+      }
+    }
+
+    function openCreateRutaModal() {
+      isRutaEditing = false;
+      document.getElementById("rNombre").value = "";
+      document.getElementById("rNombre").readOnly = false;
+      document.getElementById("rDesc").value = "";
+      modRut.show();
+    }
+
+    function openEditRutaModal(name) {
+      const r = localRutasConfig.find(ruta => ruta.nombre === name);
+      if (!r) return;
+      isRutaEditing = true;
+      document.getElementById("rNombre").value = r.nombre;
+      document.getElementById("rNombre").readOnly = true;
+      document.getElementById("rDesc").value = r.descripcion;
+      modRut.show();
+    }
+
+    async function saveRuta(e) {
+      e.preventDefault();
+      const input = {
+        nombre: document.getElementById("rNombre").value.trim(),
+        descripcion: document.getElementById("rDesc").value.trim()
+      };
+
+      try {
+        const res = await callBaaS("saveRuta", { rutaInput: input });
+        modRut.hide();
+        loadConfigRutas();
+        showSectionAlert("rutasAlert", res.message, "success");
+      } catch (err) {
+        alert("Error: " + err.message);
+      }
+    }
+
+    async function deleteRuta(nombre) {
+      if (confirm("¿Deseas eliminar la ruta: " + nombre + "?")) {
+        try {
+          const res = await callBaaS("deleteRuta", { nombre: nombre });
+          showSectionAlert("rutasAlert", res.message, "success");
+          loadConfigRutas();
+        } catch (err) {
+          showSectionAlert("rutasAlert", "Fallo: " + err.message, "danger");
+        }
+      }
+    }
+
+    // Competencias
+    let modCmp = null;
+    let localCompsConfig = [];
+
+    async function loadConfigComps() {
+      const tbody = document.getElementById("tblConfigComps");
+      tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted">Cargando...</td></tr>`;
+      modCmp = new bootstrap.Modal(document.getElementById("modalCmp"));
+
+      try {
+        const res = await callBaaS("getRutasYCompetencias");
+        localCompsConfig = res.competencias;
+        tbody.innerHTML = res.competencias.map(c => `
+          <tr>
+            <td><strong>${c.nombre}</strong></td>
+            <td><span class="badge bg-info text-dark">${c.ruta}</span></td>
+            <td>
+              <div class="small fw-semibold text-dark">${c.descripcion}</div>
+              <div class="small text-muted py-1 bg-light px-2 rounded mt-1" style="white-space:pre-wrap; font-size:0.8rem;">${c.caracteristicas}</div>
+            </td>
+            <td class="text-end">
+              <div class="d-flex gap-2 justify-content-end">
+                <button class="btn btn-outline-dark btn-sm" onclick="openEditCompModal('${c.nombre}')">Editar</button>
+                <button class="btn btn-outline-danger btn-sm" onclick="deleteComp('${c.nombre}')">Eliminar</button>
+              </div>
+            </td>
+          </tr>
+        `).join("");
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger">Error: ${err.message}</td></tr>`;
+      }
+    }
+
+    function openCreateCompModal() {
+      isCompEditing = false;
+      document.getElementById("cNombre").value = "";
+      document.getElementById("cNombre").readOnly = false;
+      document.getElementById("cDesc").value = "";
+      document.getElementById("cCarac").value = "";
+
+      // Rutas
+      const select = document.getElementById("cRuta");
+      select.innerHTML = localRutasConfig.map(r => `<option value="${r.nombre}">${r.nombre}</option>`).join("");
+      modCmp.show();
+    }
+
+    function openEditCompModal(name) {
+      const c = localCompsConfig.find(comp => comp.nombre === name);
+      if (!c) return;
+
+      isCompEditing = true;
+      document.getElementById("cNombre").value = c.nombre;
+      document.getElementById("cNombre").readOnly = true;
+      document.getElementById("cDesc").value = c.descripcion;
+      document.getElementById("cCarac").value = c.caracteristicas;
+
+      const select = document.getElementById("cRuta");
+      select.innerHTML = localRutasConfig.map(r => `<option value="${r.nombre}" ${r.nombre === c.ruta ? "selected" : ""}>${r.nombre}</option>`).join("");
+      modCmp.show();
+    }
+
+    async function saveCompetencia(e) {
+      e.preventDefault();
+      const input = {
+        nombre: document.getElementById("cNombre").value.trim(),
+        ruta: document.getElementById("cRuta").value,
+        descripcion: document.getElementById("cDesc").value.trim(),
+        caracteristicas: document.getElementById("cCarac").value.trim()
+      };
+
+      try {
+        const res = await callBaaS("saveCompetencia", { compInput: input });
+        modCmp.hide();
+        loadConfigComps();
+        showSectionAlert("compsAlert", res.message, "success");
+      } catch (err) {
+        alert("Error: " + err.message);
+      }
+    }
+
+    async function deleteComp(nombre) {
+      if (confirm("¿Deseas eliminar la competencia: " + nombre + "?")) {
+        try {
+          const res = await callBaaS("deleteCompetencia", { nombre: nombre });
+          showSectionAlert("compsAlert", res.message, "success");
+          loadConfigComps();
+        } catch (err) {
+          showSectionAlert("compsAlert", err.message, "danger");
+        }
+      }
+    }
+
+    // Pilares
+    let modPil = null;
+
+    async function loadConfigPilares() {
+      const tbody = document.getElementById("tblConfigPilares");
+      tbody.innerHTML = `<tr><td colspan="2" class="text-center text-muted">Cargando...</td></tr>`;
+      modPil = new bootstrap.Modal(document.getElementById("modalPilar"));
+
+      try {
+        const res = await callBaaS("getPilares");
+        tbody.innerHTML = res.data.map(p => `
+          <tr>
+            <td><strong>${p}</strong></td>
+            <td class="text-end">
+              <button class="btn btn-outline-danger btn-sm" onclick="deletePilar('${p}')">Eliminar</button>
+            </td>
+          </tr>
+        `).join("");
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="2" class="text-center text-danger">Error: ${err.message}</td></tr>`;
+      }
+    }
+
+    function openCreatePilarModal() {
+      document.getElementById("pNombre").value = "";
+      modPil.show();
+    }
+
+    async function savePilar(e) {
+      e.preventDefault();
+      const input = { nombre: document.getElementById("pNombre").value.trim() };
+      try {
+        const res = await callBaaS("savePilar", { pilarInput: input });
+        modPil.hide();
+        loadConfigPilares();
+        showSectionAlert("pilaresAlert", res.message, "success");
+      } catch (err) {
+        alert("Error: " + err.message);
+      }
+    }
+
+    async function deletePilar(nombre) {
+      if (confirm("¿Deseas eliminar el pilar: " + nombre + "?")) {
+        try {
+          const res = await callBaaS("deletePilar", { nombre: nombre });
+          showSectionAlert("pilaresAlert", res.message, "success");
+          loadConfigPilares();
+        } catch (err) {
+          showSectionAlert("pilaresAlert", err.message, "danger");
+        }
+      }
+    }
+  </script>
+</body>
+</html>
